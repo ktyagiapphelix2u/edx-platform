@@ -449,7 +449,7 @@ services:
 
   lms:
     # Switch to `--settings devstack_with_worker` if you want to use lms-worker
-    command: bash -c 'source /edx/app/edxapp/edxapp_env && while true; do python /edx/app/edxapp/edx-platform/manage.py lms runserver 0.0.0.0:18000 --settings devstack; sleep 2; done'
+    command: bash -c 'source /edx/app/edxapp/edxapp_env && (pip install -r /edx/private_requirements.txt; while true; do python /edx/app/edxapp/edx-platform/manage.py lms runserver 0.0.0.0:18000 --settings devstack; sleep 2; done)'
     container_name: "edx.${COMPOSE_PROJECT_NAME:-devstack}.lms"
     hostname: lms.devstack.edx
     depends_on:
@@ -638,7 +638,7 @@ services:
 
   cms:
     # Switch to `--settings devstack_with_worker` if you want to use cms-worker
-    command: bash -c 'source /edx/app/edxapp/edxapp_env && while true; do python /edx/app/edxapp/edx-platform/manage.py cms runserver 0.0.0.0:18010 --settings devstack; sleep 2; done'
+    command: bash -c 'source /edx/app/edxapp/edxapp_env && (pip install -r /edx/private_requirements.txt; while true; do python /edx/app/edxapp/edx-platform/manage.py lms runserver 0.0.0.0:18000 --settings devstack; sleep 2; done)'
     container_name: "edx.${COMPOSE_PROJECT_NAME:-devstack}.cms"
     hostname: cms.devstack.edx
     depends_on:
@@ -905,6 +905,22 @@ services:
       - "18280:18280"
     volumes:
       - /edx/var/enterprise-subsidy
+
+  enterprise-subsidy-consume_learner_credit_course_enrollment_lifecycle:
+    image: edxops/enterprise-subsidy-dev
+    container_name: edx.devstack.enterprise-subsidy-consume_learner_credit_course_enrollment_lifecycle
+    depends_on:
+      - mysql80
+      - memcached
+    command: >-
+      bash -c 'while true; do python /edx/app/enterprise-subsidy/manage.py consume_events -t learner-credit-course-enrollment-lifecycle -g enterprise_subsidy_dev; sleep 2; done'
+    tty: true
+    environment:
+      DJANGO_SETTINGS_MODULE: enterprise_subsidy.settings.devstack
+    working_dir: /edx/app/enterprise-subsidy
+    ports:
+      - "18281:18281"
+    stdin_open: true
 
   # ==========================================================================
   # edX Microfrontends

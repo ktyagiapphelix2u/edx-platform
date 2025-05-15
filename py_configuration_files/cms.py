@@ -90,7 +90,7 @@ CLEAR_REQUEST_CACHE_ON_TASK_COMPLETION = False
 
 ################################ DEBUG TOOLBAR ################################
 
-INSTALLED_APPS += ['debug_toolbar']
+INSTALLED_APPS += ('debug_toolbar',)
 
 MIDDLEWARE.append('debug_toolbar.middleware.DebugToolbarMiddleware')
 INTERNAL_IPS = ('127.0.0.1',)
@@ -296,11 +296,12 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 #################### Event bus backend ########################
-
-EVENT_BUS_PRODUCER = 'edx_event_bus_redis.create_producer'
-EVENT_BUS_REDIS_CONNECTION_URL = 'redis://:password@edx.devstack.redis:6379/'
+INSTALLED_APPS += ('edx_event_bus_kafka',)
+EVENT_BUS_KAFKA_SCHEMA_REGISTRY_URL = 'http://edx.devstack.schema-registry:8081'
+EVENT_BUS_KAFKA_BOOTSTRAP_SERVERS = 'edx.devstack.kafka:29092'
+EVENT_BUS_PRODUCER = 'edx_event_bus_kafka.create_producer'
+EVENT_BUS_CONSUMER = 'edx_event_bus_kafka.KafkaEventConsumer'
 EVENT_BUS_TOPIC_PREFIX = 'dev'
-EVENT_BUS_CONSUMER = 'edx_event_bus_redis.RedisEventConsumer'
 
 course_catalog_event_setting = EVENT_BUS_PRODUCER_CONFIG['org.openedx.content_authoring.course.catalog_info.changed.v1']
 course_catalog_event_setting['course-catalog-info-changed']['enabled'] = True

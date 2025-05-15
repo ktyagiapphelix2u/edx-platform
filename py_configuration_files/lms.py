@@ -80,7 +80,7 @@ DJFS = {
 
 ################################ DEBUG TOOLBAR ################################
 
-INSTALLED_APPS += ['debug_toolbar']
+INSTALLED_APPS += ('debug_toolbar',)
 MIDDLEWARE += [
     'lms.djangoapps.discussion.django_comment_client.utils.QueryCountDebugMiddleware',
     'debug_toolbar.middleware.DebugToolbarMiddleware',
@@ -504,10 +504,12 @@ WEBPACK_LOADER['DEFAULT']['TIMEOUT'] = 5
 CLOSEST_CLIENT_IP_FROM_HEADERS = []
 
 #################### Event bus backend ########################
-EVENT_BUS_PRODUCER = 'edx_event_bus_redis.create_producer'
-EVENT_BUS_REDIS_CONNECTION_URL = 'redis://:password@edx.devstack.redis:6379/'
+INSTALLED_APPS += ('edx_event_bus_kafka',)
+EVENT_BUS_KAFKA_SCHEMA_REGISTRY_URL = 'http://edx.devstack.schema-registry:8081'
+EVENT_BUS_KAFKA_BOOTSTRAP_SERVERS = 'edx.devstack.kafka:29092'
+EVENT_BUS_PRODUCER = 'edx_event_bus_kafka.create_producer'
+EVENT_BUS_CONSUMER = 'edx_event_bus_kafka.KafkaEventConsumer'
 EVENT_BUS_TOPIC_PREFIX = 'dev'
-EVENT_BUS_CONSUMER = 'edx_event_bus_redis.RedisEventConsumer'
 
 certificate_revoked_event_config = EVENT_BUS_PRODUCER_CONFIG['org.openedx.learning.certificate.revoked.v1']
 certificate_revoked_event_config['learning-certificate-lifecycle']['enabled'] = True

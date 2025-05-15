@@ -61,10 +61,7 @@ JWT_AUTH.update({
 
 # Install django-extensions for improved dev experiences
 # https://github.com/django-extensions/django-extensions#using-it
-INSTALLED_APPS += (
-    'django_extensions',
-    'edx_event_bus_kafka',
-)
+INSTALLED_APPS += ('django_extensions',)
 
 # BEGIN CELERY
 CELERY_WORKER_HIJACK_ROOT_LOGGER = True
@@ -114,6 +111,7 @@ SHELL_PLUS_IMPORTS = [
 ################### Kafka Related Settings ##############################
 
 # "Standard" Kafka settings as defined in https://github.com/openedx/event-bus-kafka/tree/main
+INSTALLED_APPS += ('edx_event_bus_kafka',)
 EVENT_BUS_KAFKA_SCHEMA_REGISTRY_URL = 'http://edx.devstack.schema-registry:8081'
 EVENT_BUS_KAFKA_BOOTSTRAP_SERVERS = 'edx.devstack.kafka:29092'
 EVENT_BUS_PRODUCER = 'edx_event_bus_kafka.create_producer'

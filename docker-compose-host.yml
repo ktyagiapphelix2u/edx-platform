@@ -43,6 +43,7 @@ services:
       - ${DEVSTACK_WORKSPACE}/src:/edx/src
       - ${PWD}/py_configuration_files/cms.py:/edx/app/edxapp/edx-platform/cms/envs/devstack.py
       - ${PWD}/py_configuration_files/lms.py:/edx/app/edxapp/edx-platform/lms/envs/devstack.py
+      - ${PWD}/py_private_requirements/lms.txt:/edx/private_requirements.txt
   lms-worker:
     volumes:
       - ${DEVSTACK_WORKSPACE}/edx-platform:/edx/app/edxapp/edx-platform
@@ -73,6 +74,7 @@ services:
       - ${DEVSTACK_WORKSPACE}/src:/edx/src
       - ${PWD}/py_configuration_files/cms.py:/edx/app/edxapp/edx-platform/cms/envs/devstack.py
       - ${PWD}/py_configuration_files/lms.py:/edx/app/edxapp/edx-platform/lms/envs/devstack.py
+      - ${PWD}/py_private_requirements/cms.txt:/edx/private_requirements.txt
   cms-worker:
     volumes:
       - ${DEVSTACK_WORKSPACE}/edx-platform:/edx/app/edxapp/edx-platform
@@ -97,7 +99,11 @@ services:
       - ${DEVSTACK_WORKSPACE}/enterprise-subsidy:/edx/app/enterprise-subsidy
       - ${DEVSTACK_WORKSPACE}/src:/edx/src
       - ${PWD}/py_configuration_files/enterprise_subsidy.py:/edx/app/enterprise-subsidy/enterprise_subsidy/settings/devstack.py
-
+  enterprise-subsidy-consume_learner_credit_course_enrollment_lifecycle:
+    volumes:
+      - ${DEVSTACK_WORKSPACE}/enterprise-subsidy:/edx/app/enterprise-subsidy
+      - ${DEVSTACK_WORKSPACE}/src:/edx/src
+      - ${PWD}/py_configuration_files/enterprise_subsidy.py:/edx/app/enterprise-subsidy/enterprise_subsidy/settings/devstack.py
   enterprise-catalog:
     volumes:
       - ${DEVSTACK_WORKSPACE}/enterprise-catalog:/edx/app/enterprise-catalog
