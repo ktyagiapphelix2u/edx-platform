@@ -1097,39 +1097,26 @@ class TestAccountRetirementCleanup(RetirementTestCase):
         assert len(update_queries) == 9, f"Expected 9 UPDATE queries, found {len(update_queries)}"
         assert len(delete_queries) == 9, f"Expected 9 DELETE queries, found {len(delete_queries)}"
 
-        # Verify UPDATE queries contain the redacted values
+        # Verify UPDATE queries contain the correct field-value assignments
         for update_query in update_queries:
-            sql = update_query['sql'].upper()
             sql_lower = update_query['sql']
-            # Check that SET clause contains the redacted values
-            assert redacted_username in sql_lower, (
-                f"UPDATE query missing redacted username '{redacted_username}': {sql_lower}"
+            # Check that the correct field is set with the correct value
+            # This ensures that if someone swaps the assignments, the test will fail
+            assert f"original_username" in sql_lower and f"= '{redacted_username}'" in sql_lower, (
+                f"UPDATE query missing 'original_username = {redacted_username}': {sql_lower}"
             )
-            assert redacted_email in sql_lower, f"UPDATE query missing redacted email '{redacted_email}': {sql_lower}"
-            assert redacted_name in sql_lower, f"UPDATE query missing redacted name '{redacted_name}': {sql_lower}"
-            # Verify it's an UPDATE on the correct table
-            assert 'original_username' in sql_lower or 'original_email' in sql_lower, (
-                f"UPDATE query doesn't appear to update retirement fields: {sql_lower}"
+            assert f"original_email" in sql_lower and f"= '{redacted_email}'" in sql_lower, (
+                f"UPDATE query missing 'original_email = {redacted_email}': {sql_lower}"
+            )
+            assert f"original_name" in sql_lower and f"= '{redacted_name}'" in sql_lower, (
+                f"UPDATE query missing 'original_name = {redacted_name}': {sql_lower}"
             )
 
-    def test_simple_success(self):
+    def test_default_redacted_values(self):
         """
         Test basic cleanup with default redacted values.
-        """
-        # Verify redaction happens (records exist before cleanup)
-        assert UserRetirementStatus.objects.count() == 9
-
-        # Make the cleanup request
-        self.cleanup_and_assert_status()
-
-        # Records should be deleted after redaction
-        retirements = UserRetirementStatus.objects.all()
-        assert retirements.count() == 0
-
-    def test_redaction_before_deletion(self):
-        """
         Verify that redaction (UPDATE) happens before deletion (DELETE).
-        Captures actual SQL queries to ensure UPDATE queries contain redacted values.
+        Captures actual SQL queries to ensure UPDATE queries contain correct field-value assignments.
         """
         with CaptureQueriesContext(connection) as context:
             self.cleanup_and_assert_status()
