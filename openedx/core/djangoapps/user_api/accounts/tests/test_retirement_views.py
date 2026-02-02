@@ -1102,13 +1102,13 @@ class TestAccountRetirementCleanup(RetirementTestCase):
             sql_lower = update_query['sql']
             # Check that the correct field is set with the correct value
             # This ensures that if someone swaps the assignments, the test will fail
-            assert f"original_username" in sql_lower and f"= '{redacted_username}'" in sql_lower, (
+            assert "original_username" in sql_lower and f"= '{redacted_username}'" in sql_lower, (
                 f"UPDATE query missing 'original_username = {redacted_username}': {sql_lower}"
             )
-            assert f"original_email" in sql_lower and f"= '{redacted_email}'" in sql_lower, (
+            assert "original_email" in sql_lower and f"= '{redacted_email}'" in sql_lower, (
                 f"UPDATE query missing 'original_email = {redacted_email}': {sql_lower}"
             )
-            assert f"original_name" in sql_lower and f"= '{redacted_name}'" in sql_lower, (
+            assert "original_name" in sql_lower and f"= '{redacted_name}'" in sql_lower, (
                 f"UPDATE query missing 'original_name = {redacted_name}': {sql_lower}"
             )
 
