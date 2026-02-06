@@ -1054,12 +1054,17 @@ class AccountRetirementStatusView(ViewSet):
             # Redact PII fields first, then delete. In case an ETL tool is syncing data
             # to a downstream data warehouse, and treats the deletes as soft-deletes,
             # the data will have first been redacted, protecting the sensitive PII.
-            for retirement in retirements:
-                retirement.original_username = redacted_username
-                retirement.original_email = redacted_email
-                retirement.original_name = redacted_name
-                retirement.save()
-                retirement.delete()
+            retirements.update(
+                original_username=redacted_username,
+                original_email=redacted_email,
+                original_name=redacted_name
+            )
+            UserRetirementStatus.objects.filter(
+                original_username=redacted_username,
+                original_email=redacted_email,
+                original_name=redacted_name,
+                current_state=complete_state
+            ).delete()
 
             return Response(status=status.HTTP_204_NO_CONTENT)
         except (RetirementStateError, UserRetirementStatus.DoesNotExist, TypeError) as exc:
