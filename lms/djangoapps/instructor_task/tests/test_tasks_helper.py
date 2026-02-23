@@ -27,11 +27,11 @@ from pytz import UTC
 import openedx.core.djangoapps.user_api.course_tag.api as course_tag_api
 import openedx.core.djangoapps.content.block_structure.api as bs_api
 from xmodule.capa.tests.response_xml_factory import MultipleChoiceResponseXMLFactory  # lint-amnesty, pylint: disable=wrong-import-order
+from lms.djangoapps.course_blocks.transformers import library_content
 from common.djangoapps.course_modes.models import CourseMode
 from common.djangoapps.student.models import CourseEnrollment, CourseEnrollmentAllowed
 from common.djangoapps.student.tests.factories import CourseEnrollmentFactory, UserFactory
 from lms.djangoapps.certificates.data import CertificateStatuses
-from lms.djangoapps.certificates.models import GeneratedCertificate
 from lms.djangoapps.certificates.tests.factories import CertificateAllowlistFactory, GeneratedCertificateFactory
 from lms.djangoapps.courseware.models import StudentModule
 from lms.djangoapps.grades.course_data import CourseData
@@ -116,6 +116,7 @@ class TestInstructorGradeReport(InstructorGradeReportTestCase):
     """
     Tests that CSV grade report generation works.
     """
+
     def setUp(self):
         super().setUp()
         self.course = CourseFactory.create()
@@ -524,6 +525,48 @@ class TestProblemResponsesReport(TestReportMixin, InstructorTaskModuleTestCase):
 
         assert len(student_data) == 4
 
+    @patch('lms.djangoapps.instructor_task.tasks_helper.grades.list_problem_responses', return_value=[])
+    def test_problem_responses_excludes_library_content_transformers(self, _mock_list_problem_responses):
+        """Ensure ProblemResponses bypasses per-user library_content transformers.
+
+        The default course block access transformers include library_content transformers
+        that filter children based on the requesting user's selections. Reports must exclude
+        those transformers so output is not dependent on the instructor running the report.
+        """
+        problem = self.define_option_problem('Problem1')
+
+        captured = {}
+
+        class _FakeCourseBlocks:
+            """Minimal fake CourseBlocks object for testing."""
+            def get_xblock_field(self, _usage_key, field_name):
+                if field_name == 'display_name':
+                    return 'Problem1'
+                return None
+
+            def get_children(self, _usage_key):
+                return []
+
+        def _fake_get_course_blocks(_user, _usage_key, transformers=None, **_kwargs):
+            captured['transformers'] = transformers
+            return _FakeCourseBlocks()
+
+        with patch(
+            'lms.djangoapps.instructor_task.tasks_helper.grades.get_course_blocks',
+            side_effect=_fake_get_course_blocks,
+        ):
+            ProblemResponses._build_student_data(
+                user_id=self.instructor.id,
+                course_key=self.course.id,
+                usage_key_str_list=[str(problem.location)],
+            )
+
+        transformers = captured.get('transformers')
+        assert transformers is not None
+        all_transformers = transformers._transformers['supports_filter'] + transformers._transformers['no_filter']
+        assert not any(isinstance(t, library_content.ContentLibraryTransformer) for t in all_transformers)
+        assert not any(isinstance(t, library_content.ContentLibraryOrderTransformer) for t in all_transformers)
+
     @patch(
         'lms.djangoapps.instructor_task.tasks_helper.grades.list_problem_responses',
         wraps=list_problem_responses
@@ -810,7 +853,7 @@ class TestProblemResponsesReport(TestReportMixin, InstructorTaskModuleTestCase):
             'user_id': self.instructor.id
         }
         with patch('lms.djangoapps.instructor_task.tasks_helper.runner._get_current_task'), \
-             freeze_time('2020-01-01'):
+                freeze_time('2020-01-01'):
             with patch('lms.djangoapps.instructor_task.tasks_helper.grades'
                        '.ProblemResponses._build_student_data') as mock_build_student_data:
                 mock_build_student_data.return_value = (
@@ -832,6 +875,7 @@ class TestProblemGradeReport(TestReportMixin, InstructorTaskModuleTestCase):
     """
     Test that the problem CSV generation works.
     """
+
     def setUp(self):
         super().setUp()
         self.initialize_course()
@@ -1138,6 +1182,7 @@ class TestProblemReportCohortedContent(TestReportMixin, ContentGroupTestCase, In
     """
     Test the problem report on a course that has cohorted content.
     """
+
     def setUp(self):
         super().setUp()
         # construct cohorted problems to work on.
@@ -1238,6 +1283,7 @@ class TestCourseSurveyReport(TestReportMixin, InstructorTaskCourseTestCase):
     """
     Tests that Course Survey report generation works.
     """
+
     def setUp(self):
         super().setUp()
         self.course = CourseFactory.create()
@@ -1333,6 +1379,7 @@ class TestStudentReport(TestReportMixin, InstructorTaskCourseTestCase):
     """
     Tests that CSV student profile report generation works.
     """
+
     def setUp(self):
         super().setUp()
         self.course = CourseFactory.create()
@@ -1475,6 +1522,7 @@ class TestListMayEnroll(TestReportMixin, InstructorTaskCourseTestCase):
     students who may enroll in a given course (but have not signed up
     for it yet) works.
     """
+
     def _create_enrollment(self, email):
         """
         Factory method for creating CourseEnrollmentAllowed objects.
@@ -1521,6 +1569,7 @@ class TestListMayEnroll(TestReportMixin, InstructorTaskCourseTestCase):
 
 class MockDefaultStorage:
     """Mock django's DefaultStorage"""
+
     def __init__(self):
         pass
 
@@ -1534,6 +1583,7 @@ class TestCohortStudents(TestReportMixin, InstructorTaskCourseTestCase):
     """
     Tests that bulk student cohorting works.
     """
+
     def setUp(self):
         super().setUp()
 
@@ -1797,6 +1847,7 @@ class TestGradeReport(TestReportMixin, InstructorTaskModuleTestCase):
     """
     Test that grade report has correct grade values.
     """
+
     def setUp(self):
         super().setUp()
         self.create_course()
@@ -1981,8 +2032,8 @@ class TestGradeReport(TestReportMixin, InstructorTaskModuleTestCase):
         if create_non_zero_grade:
             self.submit_student_answer(self.student.username, 'Problem1', ['Option 1'])
         with patch('lms.djangoapps.instructor_task.tasks_helper.runner._get_current_task'), \
-             patch('lms.djangoapps.grades.course_data.get_course_blocks') as mock_course_blocks, \
-             patch('lms.djangoapps.grades.subsection_grade.get_score') as mock_get_score:
+                patch('lms.djangoapps.grades.course_data.get_course_blocks') as mock_course_blocks, \
+                patch('lms.djangoapps.grades.subsection_grade.get_score') as mock_get_score:
             CourseGradeReport.generate(None, None, self.course.id, {}, 'graded')
             assert not mock_course_blocks.called
             assert not mock_get_score.called
@@ -1994,6 +2045,7 @@ class TestGradeReportEnrollmentAndCertificateInfo(TestReportMixin, InstructorTas
     """
     Test that grade report has correct user enrollment, verification, and certificate information.
     """
+
     def setUp(self):
         super().setUp()
 
@@ -2147,7 +2199,7 @@ class TestCertificateGeneration(InstructorTaskModuleTestCase):
                 user=student,
                 course_id=self.course.id,
                 status=CertificateStatuses.downloadable,
-                mode=GeneratedCertificate.CourseMode.VERIFIED
+                mode=CourseMode.VERIFIED
             )
 
         # Allowlist 5 students
@@ -2307,7 +2359,7 @@ class TestCertificateGeneration(InstructorTaskModuleTestCase):
                 user=student,
                 course_id=self.course.id,
                 status=CertificateStatuses.downloadable,
-                mode=GeneratedCertificate.CourseMode.VERIFIED
+                mode=CourseMode.VERIFIED
             )
 
         # Grant error certs to 3 students
@@ -2316,7 +2368,7 @@ class TestCertificateGeneration(InstructorTaskModuleTestCase):
                 user=student,
                 course_id=self.course.id,
                 status=CertificateStatuses.error,
-                mode=GeneratedCertificate.CourseMode.VERIFIED
+                mode=CourseMode.VERIFIED
             )
 
         # Grant a deleted cert to the 6th student
@@ -2325,7 +2377,7 @@ class TestCertificateGeneration(InstructorTaskModuleTestCase):
                 user=student,
                 course_id=self.course.id,
                 status=CertificateStatuses.deleted,
-                mode=GeneratedCertificate.CourseMode.VERIFIED
+                mode=CourseMode.VERIFIED
             )
 
         # Allowlist 7 students
@@ -2367,7 +2419,7 @@ class TestCertificateGeneration(InstructorTaskModuleTestCase):
                 user=student,
                 course_id=self.course.id,
                 status=CertificateStatuses.downloadable,
-                mode=GeneratedCertificate.CourseMode.VERIFIED,
+                mode=CourseMode.VERIFIED,
                 grade=default_grade
             )
 
@@ -2377,7 +2429,7 @@ class TestCertificateGeneration(InstructorTaskModuleTestCase):
                 user=student,
                 course_id=self.course.id,
                 status=CertificateStatuses.error,
-                mode=GeneratedCertificate.CourseMode.VERIFIED,
+                mode=CourseMode.VERIFIED,
                 grade=default_grade
             )
 
@@ -2387,7 +2439,7 @@ class TestCertificateGeneration(InstructorTaskModuleTestCase):
                 user=student,
                 course_id=self.course.id,
                 status=CertificateStatuses.deleted,
-                mode=GeneratedCertificate.CourseMode.VERIFIED,
+                mode=CourseMode.VERIFIED,
                 grade=default_grade
             )
 
@@ -2397,7 +2449,7 @@ class TestCertificateGeneration(InstructorTaskModuleTestCase):
                 user=student,
                 course_id=self.course.id,
                 status=CertificateStatuses.generating,
-                mode=GeneratedCertificate.CourseMode.VERIFIED,
+                mode=CourseMode.VERIFIED,
                 grade=default_grade
             )
 
@@ -2438,7 +2490,7 @@ class TestCertificateGeneration(InstructorTaskModuleTestCase):
                 user=student,
                 course_id=self.course.id,
                 status=CertificateStatuses.downloadable,
-                mode=GeneratedCertificate.CourseMode.VERIFIED,
+                mode=CourseMode.VERIFIED,
                 grade=default_grade
             )
 
@@ -2448,7 +2500,7 @@ class TestCertificateGeneration(InstructorTaskModuleTestCase):
                 user=student,
                 course_id=self.course.id,
                 status=CertificateStatuses.error,
-                mode=GeneratedCertificate.CourseMode.VERIFIED,
+                mode=CourseMode.VERIFIED,
                 grade=default_grade
             )
 
@@ -2458,7 +2510,7 @@ class TestCertificateGeneration(InstructorTaskModuleTestCase):
                 user=student,
                 course_id=self.course.id,
                 status=CertificateStatuses.unavailable,
-                mode=GeneratedCertificate.CourseMode.VERIFIED,
+                mode=CourseMode.VERIFIED,
                 grade=default_grade
             )
 
@@ -2468,7 +2520,7 @@ class TestCertificateGeneration(InstructorTaskModuleTestCase):
                 user=student,
                 course_id=self.course.id,
                 status=CertificateStatuses.generating,
-                mode=GeneratedCertificate.CourseMode.VERIFIED,
+                mode=CourseMode.VERIFIED,
                 grade=default_grade
             )
 
@@ -2513,7 +2565,7 @@ class TestCertificateGeneration(InstructorTaskModuleTestCase):
                 user=student,
                 course_id=self.course.id,
                 status=CertificateStatuses.downloadable,
-                mode=GeneratedCertificate.CourseMode.VERIFIED
+                mode=CourseMode.VERIFIED
             )
 
         # Grant error certs to 3 students
@@ -2522,7 +2574,7 @@ class TestCertificateGeneration(InstructorTaskModuleTestCase):
                 user=student,
                 course_id=self.course.id,
                 status=CertificateStatuses.error,
-                mode=GeneratedCertificate.CourseMode.VERIFIED
+                mode=CourseMode.VERIFIED
             )
 
         # Grant a deleted cert to the 6th student
@@ -2531,7 +2583,7 @@ class TestCertificateGeneration(InstructorTaskModuleTestCase):
                 user=student,
                 course_id=self.course.id,
                 status=CertificateStatuses.deleted,
-                mode=GeneratedCertificate.CourseMode.VERIFIED
+                mode=CourseMode.VERIFIED
             )
 
         # Grant a notpassing cert to the 7th student
@@ -2540,7 +2592,7 @@ class TestCertificateGeneration(InstructorTaskModuleTestCase):
                 user=student,
                 course_id=self.course.id,
                 status=CertificateStatuses.notpassing,
-                mode=GeneratedCertificate.CourseMode.VERIFIED
+                mode=CourseMode.VERIFIED
             )
 
         # Allowlist 7 students

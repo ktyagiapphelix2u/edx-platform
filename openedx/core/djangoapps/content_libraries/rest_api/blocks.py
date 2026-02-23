@@ -10,7 +10,7 @@ from django.utils.decorators import method_decorator
 from drf_yasg.utils import swagger_auto_schema
 from opaque_keys.edx.locator import LibraryLocatorV2, LibraryUsageLocatorV2
 from openedx_authz.constants import permissions as authz_permissions
-from openedx_learning.api import authoring as authoring_api
+from openedx_content import api as content_api
 from rest_framework import status
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.generics import GenericAPIView
@@ -194,7 +194,7 @@ class LibraryBlockAssetView(APIView):
         file_wrapper = request.data['content']
         if file_wrapper.size > 20 * 1024 * 1024:  # > 20 MiB
             # TODO: This check was written when V2 Libraries were backed by the Blockstore micro-service.
-            #       Now that we're on Learning Core, do we still need it? Here's the original comment:
+            #       Now that we're on openedx_content, do we still need it? Here's the original comment:
             #         In the future, we need a way to use file_wrapper.chunks() to read
             #         the file in chunks and stream that to Blockstore, but Blockstore
             #         currently lacks an API for streaming file uploads.
@@ -392,7 +392,7 @@ def get_component_version_asset(request, component_version_uuid, asset_path):
       eventually).
     """
     try:
-        component_version = authoring_api.get_component_version_by_uuid(
+        component_version = content_api.get_component_version_by_uuid(
             component_version_uuid
         )
     except ObjectDoesNotExist as exc:
@@ -406,12 +406,12 @@ def get_component_version_asset(request, component_version_uuid, asset_path):
     )
 
     # We already have logic for getting the correct content and generating the
-    # proper headers in Learning Core, but the response generated here is an
+    # proper headers in openedx_content, but the response generated here is an
     # X-Accel-Redirect and lacks the actual content. We eventually want to use
     # this response in conjunction with a media reverse proxy (Caddy or Nginx),
     # but in the short term we're just going to remove the redirect and stream
     # the content directly.
-    redirect_response = authoring_api.get_redirect_response_for_component_asset(
+    redirect_response = content_api.get_redirect_response_for_component_asset(
         component_version_uuid,
         asset_path,
         public=False,

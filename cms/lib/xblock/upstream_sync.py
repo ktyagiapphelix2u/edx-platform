@@ -3,7 +3,7 @@ Synchronize content and settings from upstream content to their downstream
 usages.
 
 At the time of writing, we assume that for any upstream-downstream linkage:
-* The upstream is a Component or Container from a Learning Core-backed Content
+* The upstream is a Component or Container from a openedx_content-backed Content
   Library.
 * The downstream is a block of compatible type in a SplitModuleStore-backed
   Course.
@@ -79,13 +79,14 @@ class UpstreamLink:
     """
     upstream_ref: str | None  # Reference to the upstream content, e.g., a serialized library block usage key.
     upstream_key: LibraryUsageLocatorV2 | LibraryContainerLocator | None  # parsed opaque key version of upstream_ref
+    upstream_name: str | None  # Display name of the upstream content.
     downstream_key: str | None  # Key of the downstream object.
     version_synced: int | None  # Version of the upstream to which the downstream was last synced.
     version_available: int | None  # Latest version of the upstream that's available, or None if it couldn't be loaded.
     version_declined: int | None  # Latest version which the user has declined to sync with, if any.
     error_message: str | None  # If link is valid, None. Otherwise, a localized, human-friendly error message.
     downstream_customized: list[str] | None  # List of fields modified in downstream
-    has_top_level_parent: bool  # True if this Upstream link has a top-level parent
+    top_level_parent_key: str | None  # key of top-level parent if Upstream link has a one.
 
     @property
     def is_upstream_deleted(self) -> bool:
@@ -152,7 +153,7 @@ class UpstreamLink:
         from xmodule.modulestore.django import modulestore
 
         # If this component/container has top-level parent, so we need to sync the parent
-        if self.has_top_level_parent:
+        if self.top_level_parent_key:
             return False
 
         if isinstance(self.upstream_key, LibraryUsageLocatorV2):
@@ -221,8 +222,13 @@ class UpstreamLink:
                     downstream.usage_key,
                     downstream.upstream,
                 )
+            if top_level_parent_key := getattr(downstream, "top_level_downstream_parent_key", None):
+                top_level_parent_key = str(
+                    BlockKey.from_string(top_level_parent_key).to_usage_key(downstream.usage_key.context_key)
+                )
             return cls(
                 upstream_ref=getattr(downstream, "upstream", None),
+                upstream_name=getattr(downstream, "upstream_display_name", None),
                 upstream_key=None,
                 downstream_key=str(getattr(downstream, "usage_key", "")),
                 version_synced=getattr(downstream, "upstream_version", None),
@@ -230,7 +236,7 @@ class UpstreamLink:
                 version_declined=None,
                 error_message=str(exc),
                 downstream_customized=getattr(downstream, "downstream_customized", []),
-                has_top_level_parent=getattr(downstream, "top_level_downstream_parent_key", None) is not None,
+                top_level_parent_key=top_level_parent_key,
             )
 
     @classmethod
@@ -239,7 +245,7 @@ class UpstreamLink:
         Get info on a downstream block's relationship with its linked upstream
         content (without actually loading the content).
 
-        Currently, the only supported upstreams are LC-backed Library Components
+        Currently, the only supported upstreams are openedx_content-backed Components
         (XBlocks) or Containers. This may change in the future (see module
         docstring).
 
@@ -304,16 +310,21 @@ class UpstreamLink:
                 )
             )
 
+        if top_level_parent_key := getattr(downstream, "top_level_downstream_parent_key", None):
+            top_level_parent_key = str(
+                BlockKey.from_string(top_level_parent_key).to_usage_key(downstream.usage_key.context_key)
+            )
         result = cls(
             upstream_ref=downstream.upstream,
             upstream_key=upstream_key,
+            upstream_name=downstream.upstream_display_name,
             downstream_key=str(downstream.usage_key),
             version_synced=downstream.upstream_version,
             version_available=version_available,
             version_declined=downstream.upstream_version_declined,
             error_message=None,
             downstream_customized=getattr(downstream, "downstream_customized", []),
-            has_top_level_parent=downstream.top_level_downstream_parent_key is not None,
+            top_level_parent_key=top_level_parent_key,
         )
 
         return result

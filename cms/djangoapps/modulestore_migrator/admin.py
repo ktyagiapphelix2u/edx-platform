@@ -1,5 +1,5 @@
 """
-A nice little admin interface for migrating courses and libraries from modulstore to Learning Core.
+A nice little admin interface for migrating courses and libraries from modulstore to openedx_content.
 """
 import logging
 
@@ -147,8 +147,8 @@ class ModulestoreSourceAdmin(admin.ModelAdmin):
                     source_key=source.key,
                     target_library_key=target_library_key,
                     target_collection_slug=target_collection_slug,
-                    composition_level=form.cleaned_data['composition_level'],
-                    repeat_handling_strategy=form.cleaned_data['repeat_handling_strategy'],
+                    composition_level=CompositionLevel(form.cleaned_data['composition_level']),
+                    repeat_handling_strategy=RepeatHandlingStrategy(form.cleaned_data['repeat_handling_strategy']),
                     preserve_url_slugs=form.cleaned_data['preserve_url_slugs'],
                     forward_source_to_target=form.cleaned_data['forward_to_target'],
                 )
