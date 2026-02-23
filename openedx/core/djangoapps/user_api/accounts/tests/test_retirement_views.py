@@ -1082,8 +1082,7 @@ class TestAccountRetirementCleanup(RetirementTestCase):
 
     def _assert_redacted_update_delete_queries(self, queries, redacted_username, redacted_email, redacted_name):
         """
-        Helper method to verify UPDATE and DELETE queries contain correct field-value assignments.
-
+        Helper method to verify UPDATE and DELETE queries use ID-based filtering and correct field-value assignments.
         Args:
             queries: List of captured query dicts from CaptureQueriesContext
             redacted_username: Expected redacted username value
@@ -1092,33 +1091,35 @@ class TestAccountRetirementCleanup(RetirementTestCase):
         """
         update_queries = [q for q in queries if 'UPDATE' in q['sql'] and 'user_api_userretirementstatus' in q['sql']]
         delete_queries = [q for q in queries if 'DELETE' in q['sql'] and 'user_api_userretirementstatus' in q['sql']]
-
         # Should have exactly 1 bulk UPDATE and 1 bulk DELETE query (not individual per-record queries)
         assert len(update_queries) == 1, f"Expected 1 UPDATE query, found {len(update_queries)}"
         assert len(delete_queries) == 1, f"Expected 1 DELETE query, found {len(delete_queries)}"
-
-        # Verify UPDATE query redacts records with the correct field-value assignments
-        for update_query in update_queries:
-            sql_lower = update_query['sql']
-            # Ensure original_username, original_email, and original_name are set to redacted values
-            assert "original_username" in sql_lower and f"= '{redacted_username}'" in sql_lower, (
-                f"UPDATE query missing 'original_username = {redacted_username}': {sql_lower}"
-            )
-            assert "original_email" in sql_lower and f"= '{redacted_email}'" in sql_lower, (
-                f"UPDATE query missing 'original_email = {redacted_email}': {sql_lower}"
-            )
-            assert "original_name" in sql_lower and f"= '{redacted_name}'" in sql_lower, (
-                f"UPDATE query missing 'original_name = {redacted_name}': {sql_lower}"
-            )
-
-        # Verify DELETE query is a single bulk operation (uses ID-based deletion after the update)
-        # Django optimizes by deleting the records using their IDs rather than re-filtering
-        for delete_query in delete_queries:
-            sql_lower = delete_query['sql']
-            # Ensure it's a single DELETE statement for the UserRetirementStatus table
-            assert 'DELETE FROM' in sql_lower and 'user_api_userretirementstatus' in sql_lower, (
-                f"DELETE query doesn't match expected pattern: {sql_lower}"
-            )
+        # Verify UPDATE query redacts records with the correct field-value assignments and uses ID-based filtering
+        update_query = update_queries[0]
+        sql_lower = update_query['sql']
+        # Ensure original_username, original_email, and original_name are set to redacted values
+        assert f'"original_username" = \'{redacted_username}\'' in sql_lower, (
+            f"UPDATE query missing '\"original_username\" = {redacted_username}': {sql_lower}"
+        )
+        assert f'"original_email" = \'{redacted_email}\'' in sql_lower, (
+            f"UPDATE query missing '\"original_email\" = {redacted_email}': {sql_lower}"
+        )
+        assert f'"original_name" = \'{redacted_name}\'' in sql_lower, (
+            f"UPDATE query missing '\"original_name\" = {redacted_name}': {sql_lower}"
+        )
+        # Ensure UPDATE uses ID-based filtering
+        assert '"id" IN' in sql_lower or 'WHERE "id"' in sql_lower, (
+            f"UPDATE query should use ID filtering to prevent over-update, but got: {sql_lower}"
+        )
+        # Verify DELETE is from the correct table and uses ID-based filtering
+        delete_query = delete_queries[0]
+        sql_lower = delete_query['sql']
+        assert 'user_api_userretirementstatus' in sql_lower, (
+            f"DELETE query against unexpected table: {sql_lower}"
+        )
+        assert '"id" IN' in sql_lower or 'WHERE "id"' in sql_lower, (
+            f"DELETE query should use ID filtering to prevent over-deletion, but got: {sql_lower}"
+        )
 
     def test_default_redacted_values(self):
         """
@@ -1160,6 +1161,28 @@ class TestAccountRetirementCleanup(RetirementTestCase):
         self._assert_redacted_update_delete_queries(
             context.captured_queries, custom_username, custom_email, custom_name
         )
+
+    def test_does_not_delete_unrelated_redacted_records(self):
+        """
+        Verify cleanup doesn't delete unrelated records with coincidental redacted values.
+        Regression test for over-deletion bug where deletion was filtered by field values
+        (original_username='redacted') instead of by primary key.
+        """
+        # Create an unrelated record that already has redacted field values
+        other_user = UserFactory()
+        other_retirement = create_retirement_status(other_user, state=self.complete_state)
+        other_retirement.original_username = 'redacted'
+        other_retirement.original_email = 'redacted'
+        other_retirement.original_name = 'redacted'
+        other_retirement.save()
+        other_id = other_retirement.id
+        # Clean up only self.usernames records
+        self.cleanup_and_assert_status()
+        # Verify target records were deleted
+        target_count = UserRetirementStatus.objects.filter(user__username__in=self.usernames).count()
+        assert target_count == 0, f"Expected 0 target records, found {target_count}"
+        # Verify unrelated record was NOT deleted (not a target of cleanup)
+        assert UserRetirementStatus.objects.filter(id=other_id).exists()
 
     def test_leaves_other_users(self):
         remaining_usernames = []
