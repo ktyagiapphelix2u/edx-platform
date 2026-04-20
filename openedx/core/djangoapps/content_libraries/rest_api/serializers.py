@@ -8,21 +8,18 @@ import logging
 from django.core.validators import validate_unicode_slug
 from opaque_keys import InvalidKeyError, OpaqueKey
 from opaque_keys.edx.locator import LibraryContainerLocator, LibraryUsageLocatorV2
-from openedx_learning.api.authoring_models import Collection, LearningPackage
+from openedx_content.models_api import Collection, LearningPackage
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from user_tasks.models import UserTaskStatus
 
-from openedx.core.djangoapps.content_libraries.tasks import LibraryRestoreTask
 from openedx.core.djangoapps.content_libraries import api
-from openedx.core.djangoapps.content_libraries.api.containers import ContainerType
 from openedx.core.djangoapps.content_libraries.constants import ALL_RIGHTS_RESERVED, LICENSE_OPTIONS
 from openedx.core.djangoapps.content_libraries.models import (
     ContentLibrary,
-    ContentLibraryBlockImportTask,
-    ContentLibraryPermission
+    ContentLibraryPermission,
 )
-from openedx.core.lib.api.serializers import CourseKeyField
+from openedx.core.djangoapps.content_libraries.tasks import LibraryRestoreTask
 
 from .. import permissions
 
@@ -51,7 +48,6 @@ class ContentLibraryMetadataSerializer(serializers.Serializer):
     published_by = serializers.CharField(read_only=True)
     last_draft_created = serializers.DateTimeField(format=DATETIME_FORMAT, read_only=True)
     last_draft_created_by = serializers.CharField(read_only=True)
-    allow_lti = serializers.BooleanField(default=False, read_only=True)
     allow_public_learning = serializers.BooleanField(default=False)
     allow_public_read = serializers.BooleanField(default=False)
     has_unpublished_changes = serializers.BooleanField(read_only=True)
@@ -198,7 +194,7 @@ class LibraryXBlockCreationSerializer(serializers.Serializer):
 
     block_type = serializers.CharField()
 
-    # TODO: Rename to ``block_id`` or ``slug``. The Learning Core XBlock runtime
+    # TODO: Rename to ``block_id`` or ``slug``. The openedx_content XBlock runtime
     # doesn't use definition_ids, but this field is really just about requesting
     # a specific block_id, e.g. the "best_tropical_vacation_spots" portion of a
     # problem with UsageKey:
@@ -252,21 +248,28 @@ class LibraryContainerMetadataSerializer(PublishableItemSerializer):
 
     Converts from ContainerMetadata to JSON-compatible data
     """
-    # Use 'source' to get this as a string, not an enum value instance which the container_type field has.
-    container_type = serializers.CharField(source="container_key.container_type")
+    container_type_code = serializers.CharField(source="container_key.container_type")
+    # Deprecated (ambiguously named). Identical to container_type_code.
+    container_type = serializers.CharField(source="container_key.container_type", required=False)
 
     # When creating a new container in a library, the slug becomes the ID part of
     # the definition key and usage key:
     slug = serializers.CharField(write_only=True, required=False)
 
-    def to_internal_value(self, data):
+    def to_internal_value(self, data: dict):
         """
         Convert JSON-ish data back to native python types.
         Returns a dictionary, not a ContainerMetadata instance.
         """
-        result = super().to_internal_value(data)
-        result["container_type"] = ContainerType(data["container_type"])
-        return result
+        if "container_type_code" not in data:
+            data["container_type_code"] = data.get("container_type")  # Support deprecated field name
+        validated_data = super().to_internal_value(data)
+        # If creating a new container, the above function results in:
+        # {'display_name': '...', 'container_key': {'container_type': 'unit'}}
+        # Fix that:
+        validated_data["container_type_code"] = validated_data["container_key"]["container_type"]
+        del validated_data["container_key"]
+        return validated_data
 
 
 class LibraryContainerUpdateSerializer(serializers.Serializer):
@@ -275,32 +278,6 @@ class LibraryContainerUpdateSerializer(serializers.Serializer):
     """
     display_name = serializers.CharField()
 
-
-class ContentLibraryBlockImportTaskSerializer(serializers.ModelSerializer):
-    """
-    Serializer for a Content Library block import task.
-    """
-
-    org = serializers.SerializerMethodField()
-
-    def get_org(self, obj):
-        return obj.course_id.org
-
-    class Meta:
-        model = ContentLibraryBlockImportTask
-        fields = '__all__'
-
-
-class ContentLibraryBlockImportTaskCreateSerializer(serializers.Serializer):
-    """
-    Serializer to create a new block import task.
-
-    The serializer accepts the following parameter:
-
-    - The courseware course key to import blocks from.
-    """
-
-    course_key = CourseKeyField()
 
 
 class ContentLibraryCollectionSerializer(serializers.ModelSerializer):

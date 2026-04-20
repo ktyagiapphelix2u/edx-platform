@@ -7,11 +7,8 @@ from django.contrib.auth import get_user_model
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from model_utils.models import TimeStampedModel
-from opaque_keys.edx.django.models import (
-    LearningContextKeyField,
-    UsageKeyField,
-)
-from openedx_learning.api.authoring_models import (
+from opaque_keys.edx.django.models import LearningContextKeyField, UsageKeyField
+from openedx_content.models_api import (
     Collection,
     DraftChangeLog,
     DraftChangeLogRecord,
@@ -47,8 +44,8 @@ class ModulestoreSource(models.Model):
       control whether `forwarded` is set to any given migration.
     """
     key = LearningContextKeyField(
-        max_length=255,
         unique=True,
+        case_sensitive=True,
         help_text=_('Key of the content source (a course or a legacy library)'),
     )
     forwarded = models.OneToOneField(
@@ -68,7 +65,7 @@ class ModulestoreSource(models.Model):
 class ModulestoreMigration(models.Model):
     """
     Tracks the action of a user importing a Modulestore-based course or legacy library into a
-    learning-core based learning package
+    openedx_content based learning package
 
     Notes:
     * As of Ulmo, a learning package is always associated with a v2 content library, but we
@@ -85,7 +82,7 @@ class ModulestoreMigration(models.Model):
         on_delete=models.CASCADE,
         related_name="migrations",
     )
-    source_version = models.CharField(
+    source_version = models.CharField(  # noqa: DJ001
         max_length=255,
         blank=True,
         null=True,
@@ -189,7 +186,7 @@ class ModulestoreBlockSource(TimeStampedModel):
         related_name="blocks",
     )
     key = UsageKeyField(
-        max_length=255,
+        case_sensitive=True,
         unique=True,
         help_text=_('Original usage key of the XBlock that has been imported.'),
     )
@@ -243,7 +240,7 @@ class ModulestoreBlockMigration(TimeStampedModel):
         null=True,
         on_delete=models.SET_NULL,
     )
-    unsupported_reason = models.TextField(
+    unsupported_reason = models.TextField(  # noqa: DJ001
         null=True,
         blank=True,
         help_text=_('Reason if the block is unsupported and target is set to null'),
