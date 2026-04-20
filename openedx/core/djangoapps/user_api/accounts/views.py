@@ -42,11 +42,13 @@ from wiki.models.pluginbase import RevisionPluginRevision
 from common.djangoapps.track import segment
 from common.djangoapps.entitlements.models import CourseEntitlement
 from common.djangoapps.student.models import (  # lint-amnesty, pylint: disable=unused-import
+    AccountRecovery,
     CourseEnrollmentAllowed,
     LoginFailures,
     ManualEnrollmentAudit,
     PendingEmailChange,
     PendingNameChange,
+    PendingSecondaryEmailChange,
     User,
     UserProfile,
     get_potentially_retired_user_by_username,
@@ -1161,8 +1163,14 @@ class AccountRetirementView(ViewSet):
             self.retire_user_from_pending_enterprise_customer_user(user, retired_email)
             self.retire_entitlement_support_detail(user)
 
-            # Retire misc. models that may contain PII of this user
+            # Retire misc. models that may contain PII of this user.
+            # Redact pending email fields before delete because downstream
+            # replication may preserve soft-deleted snapshots.
+            PendingEmailChange.redact_pending_email_by_user_value(user, field="user")
             PendingEmailChange.delete_by_user_value(user, field="user")
+            PendingSecondaryEmailChange.redact_pending_secondary_email_by_user_value(user, field="user")
+            PendingSecondaryEmailChange.delete_by_user_value(user, field="user")
+            AccountRecovery.retire_recovery_email(user.id)
             UserOrgTag.delete_by_user_value(user, field="user")
 
             # Retire any objects linked to the user via their original email

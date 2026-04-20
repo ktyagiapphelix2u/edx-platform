@@ -37,6 +37,7 @@ from common.djangoapps.student.models import (
     ManualEnrollmentAudit,
     PendingEmailChange,
     PendingNameChange,
+    PendingSecondaryEmailChange,
     Registration,
     SocialLink,
     UserProfile,
@@ -241,6 +242,24 @@ class TestDeactivateLogout(RetirementTestCase):
 
         # Assert that there is no longer a secondary/recovery email for test user
         assert len(AccountRecovery.objects.filter(user_id=self.test_user.id)) == 0
+
+    def test_user_can_deactivate_pending_secondary_email_change(self):
+        """
+        Verify that pending secondary email change records are removed when a user deactivates.
+        """
+        PendingSecondaryEmailChange.objects.create(
+            user=self.test_user,
+            new_secondary_email='pending-secondary@example.com',
+            activation_key='b' * 32,
+        )
+        assert PendingSecondaryEmailChange.objects.filter(user_id=self.test_user.id).exists()
+
+        self.client.login(username=self.test_user.username, password=self.test_password)
+        headers = build_jwt_headers(self.test_user)
+        response = self.client.post(self.url, self.build_post(self.test_password), **headers)
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+        assert not PendingSecondaryEmailChange.objects.filter(user_id=self.test_user.id).exists()
 
     def test_password_mismatch(self):
         """
@@ -1326,6 +1345,16 @@ class TestAccountRetirementPost(RetirementTestCase):
 
         # Misc. setup
         PendingEmailChangeFactory.create(user=self.test_user)
+        PendingSecondaryEmailChange.objects.create(
+            user=self.test_user,
+            new_secondary_email='pending-secondary@example.com',
+            activation_key='b' * 32,
+        )
+        AccountRecovery.objects.create(
+            user=self.test_user,
+            secondary_email='confirmed-secondary@example.com',
+            is_active=True,
+        )
         UserOrgTagFactory.create(user=self.test_user, key='foo', value='bar')
         UserOrgTagFactory.create(user=self.test_user, key='cat', value='dog')
 
@@ -1469,10 +1498,54 @@ class TestAccountRetirementPost(RetirementTestCase):
         self._entitlement_support_detail_assertions()
 
         assert not PendingEmailChange.objects.filter(user=self.test_user).exists()
+        assert not PendingSecondaryEmailChange.objects.filter(user=self.test_user).exists()
+        assert not AccountRecovery.objects.filter(user=self.test_user).exists()
         assert not UserOrgTag.objects.filter(user=self.test_user).exists()
 
         assert not CourseEnrollmentAllowed.objects.filter(email=self.original_email).exists()
         assert not UnregisteredLearnerCohortAssignments.objects.filter(email=self.original_email).exists()
+
+    @mock.patch('openedx.core.djangoapps.user_api.accounts.views.PendingEmailChange.delete_by_user_value')
+    def test_retire_user_redacts_pending_email_before_delete(self, mock_delete_pending_email):
+        pending_email_record = PendingEmailChange.objects.get(user=self.test_user)
+        pending_email_before_retirement = pending_email_record.new_email
+        activation_key_before_retirement = pending_email_record.activation_key
+        expected_retired_pending_email = get_retired_email_by_email(pending_email_before_retirement)
+
+        def _assert_redacted_then_delete(value, field):
+            pending_record = PendingEmailChange.objects.get(user=self.test_user)
+            assert pending_record.new_email == expected_retired_pending_email
+            assert pending_record.activation_key != activation_key_before_retirement
+            pending_record.delete()
+            return True
+
+        mock_delete_pending_email.side_effect = _assert_redacted_then_delete
+
+        data = {'username': self.original_username}
+        self.post_and_assert_status(data)
+
+        assert not PendingEmailChange.objects.filter(user=self.test_user).exists()
+
+    @mock.patch('openedx.core.djangoapps.user_api.accounts.views.PendingSecondaryEmailChange.delete_by_user_value')
+    def test_retire_user_redacts_pending_secondary_email_before_delete(self, mock_delete_pending_secondary_email):
+        pending_email_record = PendingSecondaryEmailChange.objects.get(user=self.test_user)
+        pending_email_before_retirement = pending_email_record.new_secondary_email
+        activation_key_before_retirement = pending_email_record.activation_key
+        expected_retired_pending_email = get_retired_email_by_email(pending_email_before_retirement)
+
+        def _assert_redacted_then_delete(value, field):
+            pending_record = PendingSecondaryEmailChange.objects.get(user=self.test_user)
+            assert pending_record.new_secondary_email == expected_retired_pending_email
+            assert pending_record.activation_key != activation_key_before_retirement
+            pending_record.delete()
+            return True
+
+        mock_delete_pending_secondary_email.side_effect = _assert_redacted_then_delete
+
+        data = {'username': self.original_username}
+        self.post_and_assert_status(data)
+
+        assert not PendingSecondaryEmailChange.objects.filter(user=self.test_user).exists()
 
     def test_retire_user_twice_idempotent(self):
         data = {'username': self.original_username}

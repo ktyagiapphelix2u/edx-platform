@@ -862,7 +862,11 @@ def activate_secondary_email(request, key):
             'secondary_email': pending_secondary_email_change.new_secondary_email
         })
 
-    pending_secondary_email_change.delete()
+    PendingSecondaryEmailChange.redact_pending_secondary_email_by_user_value(
+        pending_secondary_email_change.user,
+        field='user',
+    )
+    PendingSecondaryEmailChange.delete_by_user_value(pending_secondary_email_change.user, field='user')
 
     return render_to_response("secondary_email_change_successful.html")
 

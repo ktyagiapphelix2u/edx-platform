@@ -27,9 +27,11 @@ from common.djangoapps.student.models import (
     ManualEnrollmentAudit,
     PendingEmailChange,
     PendingNameChange,
+    PendingSecondaryEmailChange,
     UserAttribute,
     UserCelebration,
-    UserProfile
+    UserProfile,
+    get_retired_email_by_email,
 )
 from common.djangoapps.student.models_api import confirm_name_change, do_name_change_request, get_name
 from common.djangoapps.student.tests.factories import AccountRecoveryFactory, CourseEnrollmentFactory, UserFactory
@@ -597,6 +599,78 @@ class PendingEmailChangeTests(SharedModuleStoreTestCase):
         assert not record_was_deleted
         assert 1 == len(PendingEmailChange.objects.all())
 
+    def test_redact_by_user_redacts_pending_email_change_fields(self):
+        original_new_email = self.email_change.new_email
+        original_activation_key = self.email_change.activation_key
+        expected_retired_email = get_retired_email_by_email(original_new_email)
+
+        record_was_redacted = PendingEmailChange.redact_pending_email_by_user_value(self.user, field='user')
+
+        assert record_was_redacted
+        self.email_change.refresh_from_db()
+        assert self.email_change.new_email == expected_retired_email
+        assert self.email_change.activation_key != original_activation_key
+        assert len(self.email_change.activation_key) == len(original_activation_key)
+
+    def test_redact_by_user_no_effect_for_user_with_no_email_change(self):
+        original_new_email = self.email_change.new_email
+        original_activation_key = self.email_change.activation_key
+
+        record_was_redacted = PendingEmailChange.redact_pending_email_by_user_value(self.user2, field='user')
+
+        assert not record_was_redacted
+        self.email_change.refresh_from_db()
+        assert self.email_change.new_email == original_new_email
+        assert self.email_change.activation_key == original_activation_key
+
+
+class PendingSecondaryEmailChangeTests(SharedModuleStoreTestCase):
+    """
+    Tests the deletion of PendingSecondaryEmailChange records.
+    """
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.user = UserFactory()
+        cls.user2 = UserFactory()
+
+    def setUp(self):  # lint-amnesty, pylint: disable=super-method-not-called
+        self.email_change, _ = PendingSecondaryEmailChange.objects.get_or_create(
+            user=self.user,
+            new_secondary_email='new-secondary@example.com',
+            activation_key='b' * 32,
+        )
+
+    def test_redact_by_user_redacts_pending_secondary_email_change_fields(self):
+        original_new_email = self.email_change.new_secondary_email
+        original_activation_key = self.email_change.activation_key
+        expected_retired_email = get_retired_email_by_email(original_new_email)
+
+        record_was_redacted = PendingSecondaryEmailChange.redact_pending_secondary_email_by_user_value(
+            self.user,
+            field='user',
+        )
+
+        assert record_was_redacted
+        self.email_change.refresh_from_db()
+        assert self.email_change.new_secondary_email == expected_retired_email
+        assert self.email_change.activation_key != original_activation_key
+        assert len(self.email_change.activation_key) == len(original_activation_key)
+
+    def test_redact_by_user_no_effect_for_user_with_no_pending_secondary_email_change(self):
+        original_new_email = self.email_change.new_secondary_email
+        original_activation_key = self.email_change.activation_key
+
+        record_was_redacted = PendingSecondaryEmailChange.redact_pending_secondary_email_by_user_value(
+            self.user2,
+            field='user',
+        )
+
+        assert not record_was_redacted
+        self.email_change.refresh_from_db()
+        assert self.email_change.new_secondary_email == original_new_email
+        assert self.email_change.activation_key == original_activation_key
+
 
 class TestCourseEnrollmentAllowed(ModuleStoreTestCase):  # lint-amnesty, pylint: disable=missing-class-docstring
 
@@ -742,6 +816,29 @@ class TestAccountRecovery(TestCase):
 
         # Assert that there is no longer an AccountRecovery record for this user
         assert len(AccountRecovery.objects.filter(user_id=user.id)) == 0
+
+    def test_retire_recovery_email_redacts_before_delete(self):
+        user = UserFactory()
+        account_recovery = AccountRecoveryFactory(
+            user=user,
+            secondary_email='recovery@example.com',
+            is_active=True,
+        )
+        expected_retired_email = get_retired_email_by_email(account_recovery.secondary_email)
+        original_delete = AccountRecovery.delete
+
+        with mock.patch.object(AccountRecovery, 'delete', autospec=True) as mock_delete:
+            def _assert_redacted_then_delete(record, *args, **kwargs):
+                refreshed_record = AccountRecovery.objects.get(pk=record.pk)
+                assert refreshed_record.secondary_email == expected_retired_email
+                assert refreshed_record.is_active is False
+                return original_delete(record, *args, **kwargs)
+
+            mock_delete.side_effect = _assert_redacted_then_delete
+
+            assert AccountRecovery.retire_recovery_email(user_id=user.id)
+
+        assert not AccountRecovery.objects.filter(user_id=user.id).exists()
 
 
 @ddt.ddt
