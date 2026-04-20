@@ -2,9 +2,9 @@
 CMS feature toggles.
 """
 from edx_toggles.toggles import SettingToggle, WaffleFlag
+
 from openedx.core.djangoapps.content.search import api as search_api
 from openedx.core.djangoapps.waffle_utils import CourseWaffleFlag
-
 
 # .. toggle_name: ENABLE_EXPORT_GIT
 # .. toggle_implementation: SettingToggle
@@ -103,6 +103,23 @@ def use_new_video_editor(course_key):
     Returns a boolean = true if new video editor is enabled
     """
     return not LEGACY_STUDIO_VIDEO_EDITOR.is_enabled(course_key)
+
+
+# .. toggle_name: legacy_studio.pdf_editor
+# .. toggle_implementation: WaffleFlag
+# .. toggle_default: False
+# .. toggle_description: Use the PDF XBlock's studio_view instead of the new React-based editor. You may wish to do
+#      this if you run a custom PDF block.
+# .. toggle_use_cases: opt_out
+# .. toggle_creation_date: 2026-03-10
+LEGACY_STUDIO_PDF_EDITOR = WaffleFlag('legacy_studio.pdf_editor', __name__)
+
+
+def use_new_pdf_editor():
+    """
+    Returns a boolean = true if new video editor is enabled
+    """
+    return not LEGACY_STUDIO_PDF_EDITOR.is_enabled()
 
 
 # .. toggle_name: new_core_editors.use_video_gallery_flow
@@ -259,19 +276,22 @@ def use_new_export_page(course_key):
 # .. toggle_name: contentstore.new_studio_mfe.use_new_video_uploads_page
 # .. toggle_implementation: CourseWaffleFlag
 # .. toggle_default: False
-# .. toggle_description: This flag enables the use of the new studio video uploads page mfe
-# .. toggle_use_cases: temporary
-# .. toggle_creation_date: 2023-5-15
-# .. toggle_target_removal_date: 2023-8-31
-# .. toggle_tickets: TNL-10619
-# .. toggle_warning:
+# .. toggle_description: This flag enables the use of the new studio video uploads page MFE.
+#      Note: This page only works on edx.org or other sites that have reverse-engineered
+#      the edX video pipeline. It is off by default for the community.
+# .. toggle_use_cases: opt_in
+# .. toggle_creation_date: 2023-05-15
+# .. toggle_tickets: https://github.com/openedx/openedx-platform/issues/37972
 ENABLE_NEW_STUDIO_VIDEO_UPLOADS_PAGE = CourseWaffleFlag(
     f'{CONTENTSTORE_NAMESPACE}.new_studio_mfe.use_new_video_uploads_page', __name__)
 
 
 def use_new_video_uploads_page(course_key):
     """
-    Returns a boolean if new studio video uploads mfe is enabled
+    Returns a boolean if new studio video uploads MFE is enabled.
+
+    This is off by default because the video uploads page requires the edX
+    video pipeline which is not available to the open source community.
     """
     return ENABLE_NEW_STUDIO_VIDEO_UPLOADS_PAGE.is_enabled(course_key)
 

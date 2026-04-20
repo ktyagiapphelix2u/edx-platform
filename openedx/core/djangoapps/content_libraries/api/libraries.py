@@ -42,6 +42,7 @@ could be promoted to the core XBlock API and made generic.
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import datetime
@@ -57,14 +58,14 @@ from opaque_keys.edx.locator import LibraryLocatorV2, LibraryUsageLocatorV2
 from openedx_authz import api as authz_api
 from openedx_authz.api import assign_role_to_user_in_scope
 from openedx_authz.constants import permissions as authz_permissions
+from openedx_content import api as content_api
+from openedx_content.models_api import Component, LearningPackage
 from openedx_events.content_authoring.data import ContentLibraryData
 from openedx_events.content_authoring.signals import (
     CONTENT_LIBRARY_CREATED,
     CONTENT_LIBRARY_DELETED,
     CONTENT_LIBRARY_UPDATED,
 )
-from openedx_content import api as content_api
-from openedx_content.models_api import Component, LearningPackage
 from organizations.models import Organization
 from user_tasks.models import UserTaskArtifact, UserTaskStatus
 from xblock.core import XBlock
@@ -123,7 +124,7 @@ class ContentLibraryMetadata:
     Class that represents the metadata about a content library.
     """
     key: LibraryLocatorV2
-    learning_package_id: int | None
+    learning_package_id: LearningPackage.ID | None
     title: str = ""
     description: str = ""
     num_blocks: int = 0
@@ -138,7 +139,6 @@ class ContentLibraryMetadata:
     # has_unpublished_deletes will be true when the draft version of the library's bundle
     # contains deletes of any XBlocks that were in the most recently published version
     has_unpublished_deletes: bool = False
-    allow_lti: bool = False
     # Allow any user (even unregistered users) to view and interact directly
     # with this library's content in the LMS
     allow_public_learning: bool = False
@@ -335,15 +335,24 @@ def get_metadata(queryset: QuerySet[ContentLibrary], text_search: str | None = N
     return libraries
 
 
-def require_permission_for_library_key(library_key: LibraryLocatorV2, user: UserType, permission) -> ContentLibrary:
+def require_permission_for_library_key(
+    library_key: LibraryLocatorV2, user: UserType, permission: str | authz_api.data.PermissionData
+) -> ContentLibrary:
     """
-    Given any of the content library permission strings defined in
-    openedx.core.djangoapps.content_libraries.permissions,
-    check if the given user has that permission for the library with the
-    specified library ID.
+    Check if the user has the specified permission for a content library.
 
-    Raises django.core.exceptions.PermissionDenied if the user doesn't have
-    permission.
+    Args:
+        library_key: The library key identifying the content library
+        user: The user whose permissions are being checked
+        permission: Either a permission string from content_libraries.permissions
+                   or a PermissionData instance from the authz API
+
+    Returns:
+        ContentLibrary: The library object if permission check passes
+
+    Raises:
+        ContentLibraryNotFound: If the library with the given key doesn't exist
+        PermissionDenied: If the user doesn't have the required permission
     """
     library_obj = ContentLibrary.objects.get_by_key(library_key)
     # obj should be able to read any valid model object but mypy thinks it can only be
@@ -394,7 +403,6 @@ def get_library(library_key: LibraryLocatorV2) -> ContentLibraryMetadata:
         published_by=published_by,
         last_draft_created=last_draft_created,
         last_draft_created_by=last_draft_created_by,
-        allow_lti=ref.allow_lti,
         allow_public_learning=ref.allow_public_learning,
         allow_public_read=ref.allow_public_read,
         has_unpublished_changes=has_unpublished_changes,
@@ -402,7 +410,7 @@ def get_library(library_key: LibraryLocatorV2) -> ContentLibraryMetadata:
         license=ref.license,
         created=learning_package.created,
         updated=learning_package.updated,
-        learning_package_id=learning_package.pk,
+        learning_package_id=learning_package.id,
     )
 
 
@@ -437,7 +445,7 @@ def create_library(
     """
     assert isinstance(org, Organization)
     validate_unicode_slug(slug)
-    is_learning_package_loaded = learning_package is not None
+    is_learning_package_loaded = learning_package is not None  # noqa: F841
     try:
         with transaction.atomic():
             ref = ContentLibrary.objects.create(
@@ -467,7 +475,7 @@ def create_library(
             ref.learning_package = learning_package
             ref.save()
     except IntegrityError:
-        raise LibraryAlreadyExists(slug)  # lint-amnesty, pylint: disable=raise-missing-from
+        raise LibraryAlreadyExists(slug)  # lint-amnesty, pylint: disable=raise-missing-from  # noqa: B904
 
     # .. event_implemented_name: CONTENT_LIBRARY_CREATED
     # .. event_type: org.openedx.content_authoring.content_library.created.v1
@@ -486,7 +494,7 @@ def create_library(
         allow_public_learning=ref.allow_public_learning,
         allow_public_read=ref.allow_public_read,
         license=library_license,
-        learning_package_id=ref.learning_package.pk,  # type: ignore[union-attr]
+        learning_package_id=ref.learning_package.id,  # type: ignore[union-attr]
     )
 
 
@@ -494,6 +502,14 @@ def get_library_team(library_key: LibraryLocatorV2) -> list[ContentLibraryPermis
     """
     Get the list of users/groups granted permission to use this library.
     """
+    warnings.warn(
+        "get_library_team is deprecated. "
+        "Use get_all_user_role_assignments_in_scope from the openedx-authz API instead. "
+        "See https://github.com/openedx/openedx-platform/issues/37409.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     ref = ContentLibrary.objects.get_by_key(library_key)
     return [
         ContentLibraryPermissionEntry(user=entry.user, group=entry.group, access_level=entry.access_level)
@@ -506,6 +522,14 @@ def get_library_user_permissions(library_key: LibraryLocatorV2, user: UserType) 
     Fetch the specified user's access information. Will return None if no
     permissions have been granted.
     """
+    warnings.warn(
+        "get_library_user_permissions is deprecated. "
+        "Use get_user_role_assignments_in_scope from the openedx-authz API instead. "
+        "See https://github.com/openedx/openedx-platform/issues/37409.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     if isinstance(user, AnonymousUser):
         return None  # Mostly here for the type checker
     ref = ContentLibrary.objects.get_by_key(library_key)
@@ -525,6 +549,14 @@ def set_library_user_permissions(library_key: LibraryLocatorV2, user: UserType, 
 
     access_level should be one of the AccessLevel values defined above.
     """
+    warnings.warn(
+        "set_library_user_permissions is deprecated. "
+        "Use assign_library_role_to_user instead. "
+        "See https://github.com/openedx/openedx-platform/issues/37409.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     if isinstance(user, AnonymousUser):
         raise TypeError("Invalid user type")  # Mostly here for the type checker
     ref = ContentLibrary.objects.get_by_key(library_key)
@@ -573,6 +605,14 @@ def set_library_group_permissions(library_key: LibraryLocatorV2, group, access_l
 
     access_level should be one of the AccessLevel values defined above.
     """
+    warnings.warn(
+        "set_library_group_permissions is deprecated. "
+        "Use assign_library_role_to_user instead. "
+        "See https://github.com/openedx/openedx-platform/issues/37409.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     ref = ContentLibrary.objects.get_by_key(library_key)
 
     if access_level is None:
@@ -773,9 +813,15 @@ def get_backup_task_status(
 def _transform_legacy_lib_permission_to_authz_permission(permission: str) -> str:
     """
     Transform a legacy content library permission to an openedx-authz permission.
+
+    Notes:
+    - There is no dedicated permission or role for can_create_content_library in openedx-authz yet,
+        so we reuse the same permission to rely on user.has_perm via Bridgekeeper.
+    - There is no dedicated can_learn_from_this_content_library permission
+        in the new authz system,
+        but we are mapping it to view_library in the new system. So the user who can view
+        library content can learn from it.
     """
-    # There is no dedicated permission or role for can_create_content_library in openedx-authz yet,
-    # so we reuse the same permission to rely on user.has_perm via Bridgekeeper.
     return {
         permissions.CAN_CREATE_CONTENT_LIBRARY: permissions.CAN_CREATE_CONTENT_LIBRARY,
         permissions.CAN_DELETE_THIS_CONTENT_LIBRARY: authz_permissions.DELETE_LIBRARY.identifier,
@@ -783,6 +829,7 @@ def _transform_legacy_lib_permission_to_authz_permission(permission: str) -> str
         permissions.CAN_EDIT_THIS_CONTENT_LIBRARY_TEAM: authz_permissions.MANAGE_LIBRARY_TEAM.identifier,
         permissions.CAN_VIEW_THIS_CONTENT_LIBRARY: authz_permissions.VIEW_LIBRARY.identifier,
         permissions.CAN_VIEW_THIS_CONTENT_LIBRARY_TEAM: authz_permissions.VIEW_LIBRARY_TEAM.identifier,
+        permissions.CAN_LEARN_FROM_THIS_CONTENT_LIBRARY: authz_permissions.VIEW_LIBRARY.identifier,
     }.get(permission, permission)
 
 
@@ -795,6 +842,8 @@ def _transform_authz_permission_to_legacy_lib_permission(permission: str) -> str
         authz_permissions.CREATE_LIBRARY_COLLECTION.identifier: permissions.CAN_EDIT_THIS_CONTENT_LIBRARY,
         authz_permissions.EDIT_LIBRARY_COLLECTION.identifier: permissions.CAN_EDIT_THIS_CONTENT_LIBRARY,
         authz_permissions.DELETE_LIBRARY_COLLECTION.identifier: permissions.CAN_EDIT_THIS_CONTENT_LIBRARY,
+        authz_permissions.MANAGE_LIBRARY_TAGS.identifier: permissions.CAN_EDIT_THIS_CONTENT_LIBRARY,
+        authz_permissions.REUSE_LIBRARY_CONTENT.identifier: permissions.CAN_VIEW_THIS_CONTENT_LIBRARY,
     }.get(permission, permission)
 
 
@@ -818,6 +867,11 @@ def user_has_permission_across_lib_authz_systems(
     Current gaps covered here:
     - CAN_CREATE_CONTENT_LIBRARY: we call user.has_perm via Bridgekeeper to verify the user is a course creator.
     - CAN_VIEW_THIS_CONTENT_LIBRARY: we respect the allow_public_read flag via Bridgekeeper.
+    - CAN_LEARN_FROM_THIS_CONTENT_LIBRARY: this permission doesn't exist in the new authz system, but we are treating
+    it as equivalent to view_library in the new system, so we check both the legacy permission and the authz permission.
+    This means that if a user can view the library content, they can learn from it.
+    If we want to remove the old check fully, we should either update the can_learn enforcement points
+    or add that specific permission to the authz system.
 
     Replace these with authz_api.is_user_allowed once openedx-authz supports
     these conditions natively (including global (*) roles).

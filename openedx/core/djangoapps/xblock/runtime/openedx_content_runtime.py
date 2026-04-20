@@ -11,24 +11,21 @@ from urllib.parse import unquote
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db.transaction import atomic
 from django.urls import reverse
-
-from openedx_content import api as content_api
-
 from lxml import etree
-
+from openedx_content import api as content_api
 from xblock.core import XBlock
 from xblock.exceptions import NoSuchUsage
-from xblock.fields import Field, Scope, ScopeIds
 from xblock.field_data import FieldData
+from xblock.fields import Field, Scope, ScopeIds
 
 from openedx.core.djangoapps.xblock.api import get_xblock_app_config
 from openedx.core.lib.xblock_serializer.api import serialize_modulestore_block_for_openedx_content
 from openedx.core.lib.xblock_serializer.data import StaticFile
-from ..data import AuthoredDataMode, LatestVersion
-from ..utils import get_auto_latest_version
-from ..learning_context.manager import get_learning_context_impl
-from .runtime import XBlockRuntime
 
+from ..data import AuthoredDataMode, LatestVersion
+from ..learning_context.manager import get_learning_context_impl
+from ..utils import get_auto_latest_version
+from .runtime import XBlockRuntime
 
 log = logging.getLogger(__name__)
 
@@ -193,8 +190,8 @@ class OpenedXContentRuntime(XBlockRuntime):
         if component_version is None:
             raise NoSuchUsage(usage_key)
 
-        content = component_version.contents.get(
-            componentversioncontent__key="block.xml"
+        content = component_version.media.get(
+            componentversionmedia__key="block.xml"
         )
         xml_node = etree.fromstring(content.text)
         block_type = usage_key.block_type
@@ -248,22 +245,22 @@ class OpenedXContentRuntime(XBlockRuntime):
         """
         component_version = self.get_component_version_from_block(block)
 
-        # cvc = the ComponentVersionContent through-table
-        cvc_list = (
+        # cvm = the ComponentVersionMedia through-table
+        cvm_list = (
             component_version
-            .componentversioncontent_set
-            .filter(content__has_file=True)
-            .select_related('content')
+            .componentversionmedia_set
+            .filter(media__has_file=True)
+            .select_related('media')
             .order_by('key')
         )
 
         return [
             StaticFile(
-                name=cvc.key,
-                url=self._absolute_url_for_asset(component_version, cvc.key),
-                data=cvc.content.read_file().read() if fetch_asset_data else None,
+                name=cvm.key,
+                url=self._absolute_url_for_asset(component_version, cvm.key),
+                data=cvm.media.read_file().read() if fetch_asset_data else None,
             )
-            for cvc in cvc_list
+            for cvm in cvm_list
         ]
 
     def save_block(self, block):
@@ -291,24 +288,24 @@ class OpenedXContentRuntime(XBlockRuntime):
                 raise RuntimeError("You do not have permission to edit this XBlock")
 
         serialized = serialize_modulestore_block_for_openedx_content(block)
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=timezone.utc)  # noqa: UP017
         usage_key = block.scope_ids.usage_id
         with atomic():
             component = self._get_component_from_usage_key(usage_key)
             block_media_type = content_api.get_or_create_media_type(
                 f"application/vnd.openedx.xblock.v1.{usage_key.block_type}+xml"
             )
-            content = content_api.get_or_create_text_content(
+            media = content_api.get_or_create_text_media(
                 component.learning_package_id,
                 block_media_type.id,
                 text=serialized.olx_str,
                 created=now,
             )
             content_api.create_next_component_version(
-                component.pk,
+                component.id,
                 title=block.display_name,
-                content_to_replace={
-                    "block.xml": content.id,
+                media_to_replace={
+                    "block.xml": media.id,
                 },
                 created=now,
                 created_by=self.user.id if self.user else None
@@ -446,10 +443,10 @@ class OpenedXContentRuntime(XBlockRuntime):
         component_version = self.get_component_version_from_block(block)
 
         try:
-            content = (
+            media = (
                 component_version
-                .componentversioncontent_set
-                .filter(content__has_file=True)
+                .componentversionmedia_set
+                .filter(media__has_file=True)
                 .get(key=f"static/{asset_path}")
             )
         except ObjectDoesNotExist:
@@ -457,10 +454,10 @@ class OpenedXContentRuntime(XBlockRuntime):
                 # Retry with unquoted path. We don't always unquote because it would not
                 # be backwards-compatible, but we need to try both.
                 asset_path = unquote(asset_path)
-                content = (
+                media = (  # noqa: F841
                     component_version
-                    .componentversioncontent_set
-                    .filter(content__has_file=True)
+                    .componentversionmedia_set
+                    .filter(media__has_file=True)
                     .get(key=f"static/{asset_path}")
                 )
             except ObjectDoesNotExist:
