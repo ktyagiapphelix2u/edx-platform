@@ -904,7 +904,7 @@ class PendingEmailChange(DeletableByUserValue, models.Model):
     """
     This model keeps track of pending requested changes to a user's email address.
 
-    .. pii: Contains new_email, retired in AccountRetirementView
+    .. pii: Contains new_email, redacted then deleted in AccountRetirementView
     .. pii_types: email_address
     .. pii_retirement: local_api
     """
@@ -928,6 +928,23 @@ class PendingEmailChange(DeletableByUserValue, models.Model):
         self.activation_key = uuid.uuid4().hex
         self.save()
         return self.activation_key
+
+    @classmethod
+    def redact_pending_email_by_user_value(cls, value, field):
+        """
+        Redact pending email change fields for records matching ``field=value``.
+        This method is intended for retirement flows where downstream replication
+        may keep soft-deleted snapshots of these rows.
+        """
+        filter_kwargs = {field: value}
+        records_matching_user_value = cls.objects.filter(**filter_kwargs)
+        if not records_matching_user_value.exists():
+            return False
+        for record in records_matching_user_value:
+            record.new_email = get_retired_email_by_email(record.new_email)
+            record.activation_key = uuid.uuid4().hex
+            record.save(update_fields=['new_email', 'activation_key'])
+        return True
 
 
 class PendingSecondaryEmailChange(DeletableByUserValue, models.Model):

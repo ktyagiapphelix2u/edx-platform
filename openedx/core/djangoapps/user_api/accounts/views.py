@@ -1161,7 +1161,10 @@ class AccountRetirementView(ViewSet):
             self.retire_user_from_pending_enterprise_customer_user(user, retired_email)
             self.retire_entitlement_support_detail(user)
 
-            # Retire misc. models that may contain PII of this user
+            # Retire misc. models that may contain PII of this user.
+            # Redact pending primary email fields before delete because
+            # downstream replication can preserve soft-deleted snapshots.
+            PendingEmailChange.redact_pending_email_by_user_value(user, field="user")
             PendingEmailChange.delete_by_user_value(user, field="user")
             UserOrgTag.delete_by_user_value(user, field="user")
 
