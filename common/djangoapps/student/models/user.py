@@ -33,7 +33,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.core.validators import FileExtensionValidator, RegexValidator
 from django.db import IntegrityError, models
 from django.db.models import Q
-from django.db.models.signals import post_save, pre_save, post_delete
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.db.utils import ProgrammingError
 from django.dispatch import receiver
 from django.utils.translation import gettext_lazy as _
@@ -45,7 +45,6 @@ from eventtracking import tracker
 from model_utils.models import TimeStampedModel
 from opaque_keys.edx.django.models import CourseKeyField, LearningContextKeyField
 from pytz import UTC, timezone
-from openedx.core.lib import user_util
 
 import openedx.core.djangoapps.django_comment_common.comment_client as cc
 from common.djangoapps.util.model_utils import emit_field_changed_events, get_changed_fields_dict
@@ -54,6 +53,7 @@ from openedx.core.djangoapps.signals.signals import USER_ACCOUNT_ACTIVATED
 from openedx.core.djangoapps.site_configuration import helpers as configuration_helpers
 from openedx.core.djangoapps.xmodule_django.models import NoneToEmptyManager
 from openedx.core.djangolib.model_mixins import DeletableByUserValue
+from openedx.core.lib import user_util
 from openedx.core.toggles import ENTRANCE_EXAMS
 
 from .course_enrollment import (
@@ -62,7 +62,7 @@ from .course_enrollment import (
     CourseEnrollmentAllowed,
     CourseOverview,
     ManualEnrollmentAudit,
-    segment
+    segment,
 )
 
 User = get_user_model()
@@ -77,7 +77,7 @@ USER_LOGGED_OUT_EVENT_NAME = 'edx.user.logout'
 USER_STREAK_UPDATED_EVENT_NAME = "edx.user.celebration.streak_updated"
 
 
-class AnonymousUserId(models.Model):
+class AnonymousUserId(models.Model):  # noqa: DJ008
     """
     This table contains user, course_Id and anonymous_user_id
 
@@ -91,9 +91,9 @@ class AnonymousUserId(models.Model):
 
     objects = NoneToEmptyManager()
 
-    user = models.ForeignKey(User, db_index=True, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, db_index=True, on_delete=models.CASCADE)  # noqa: DJ012
     anonymous_user_id = models.CharField(unique=True, max_length=32)
-    course_id = LearningContextKeyField(db_index=True, max_length=255, blank=True)
+    course_id = LearningContextKeyField(db_index=True, blank=True)
 
 
 def anonymous_id_for_user(user, course_id):
@@ -381,7 +381,7 @@ def get_potentially_retired_user_by_username_and_hash(username, hashed_username)
     return User.objects.get(username__in=locally_hashed_usernames)
 
 
-class UserStanding(models.Model):
+class UserStanding(models.Model):  # noqa: DJ008
     """
     This table contains a student's account's status.
     Currently, we're only disabling accounts; in the future we can imagine
@@ -405,7 +405,7 @@ class UserStanding(models.Model):
     standing_last_changed_at = models.DateTimeField(auto_now=True)
 
 
-class UserProfile(models.Model):
+class UserProfile(models.Model):  # noqa: DJ008
     """This is where we store all the user demographic fields. We have a
     separate table for this rather than extending the built-in Django auth_user.
 
@@ -437,7 +437,7 @@ class UserProfile(models.Model):
     # CRITICAL TODO/SECURITY
     # Sanitize all fields.
     # This is not visible to other users, but could introduce holes later
-    user = models.OneToOneField(User, unique=True, db_index=True, related_name='profile', on_delete=models.CASCADE)
+    user = models.OneToOneField(User, unique=True, db_index=True, related_name='profile', on_delete=models.CASCADE)  # noqa: DJ012  # pylint: disable=line-too-long
     name = models.CharField(blank=True, max_length=255, db_index=True)
 
     # How meta field works: meta will only store those fields which are available in extended_profile configuration,
@@ -466,7 +466,7 @@ class UserProfile(models.Model):
         # Translators: 'Other' refers to the student's gender
         ('o', gettext_noop('Other/Prefer Not to Say'))
     )
-    gender = models.CharField(
+    gender = models.CharField(  # noqa: DJ001
         blank=True, null=True, max_length=6, db_index=True, choices=GENDER_CHOICES
     )
 
@@ -487,12 +487,12 @@ class UserProfile(models.Model):
         # Translators: 'Other' refers to the student's level of education
         ('other', gettext_noop("Other education"))
     )
-    level_of_education = models.CharField(
+    level_of_education = models.CharField(  # noqa: DJ001
         blank=True, null=True, max_length=6, db_index=True,
         choices=LEVEL_OF_EDUCATION_CHOICES
     )
-    mailing_address = models.TextField(blank=True, null=True)
-    city = models.TextField(blank=True, null=True)
+    mailing_address = models.TextField(blank=True, null=True)  # noqa: DJ001
+    city = models.TextField(blank=True, null=True)  # noqa: DJ001
     country = CountryField(blank=True, null=True)
     COUNTRY_WITH_STATES = 'US'
     STATE_CHOICES = (
@@ -551,15 +551,15 @@ class UserProfile(models.Model):
         ('WI', 'Wisconsin'),
         ('WY', 'Wyoming'),
     )
-    state = models.CharField(blank=True, null=True, max_length=2, choices=STATE_CHOICES)
-    goals = models.TextField(blank=True, null=True)
-    bio = models.CharField(blank=True, null=True, max_length=3000, db_index=False)
+    state = models.CharField(blank=True, null=True, max_length=2, choices=STATE_CHOICES)  # noqa: DJ001
+    goals = models.TextField(blank=True, null=True)  # noqa: DJ001
+    bio = models.CharField(blank=True, null=True, max_length=3000, db_index=False)  # noqa: DJ001
     profile_image_uploaded_at = models.DateTimeField(null=True, blank=True)
     phone_regex = RegexValidator(
         regex=r'^\+?1?\d*$',
         message="Phone number must start with '+' (optional) followed by digits (0-9) only.",
     )
-    phone_number = models.CharField(validators=[phone_regex], blank=True, null=True, max_length=50)
+    phone_number = models.CharField(validators=[phone_regex], blank=True, null=True, max_length=50)  # noqa: DJ001
 
     @property
     def has_profile_image(self):
@@ -823,7 +823,7 @@ def user_post_save_callback(sender, **kwargs):
     )
 
 
-class UserSignupSource(models.Model):
+class UserSignupSource(models.Model):  # noqa: DJ008
     """
     This table contains information about users registering
     via Micro-Sites
@@ -846,7 +846,7 @@ def unique_id_for_user(user):
 
 # TODO: Should be renamed to generic UserGroup, and possibly
 # Given an optional field for type of group
-class UserTestGroup(models.Model):
+class UserTestGroup(models.Model):  # noqa: DJ008
     """
     .. no_pii:
     """
@@ -855,7 +855,7 @@ class UserTestGroup(models.Model):
     description = models.TextField(blank=True)
 
 
-class Registration(models.Model):
+class Registration(models.Model):  # noqa: DJ008
     """
     Allows us to wait for e-mail before user is registered. A
     registration profile is created when the user creates an
@@ -868,7 +868,7 @@ class Registration(models.Model):
     class Meta:
         db_table = "auth_registration"
 
-    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    user = models.OneToOneField(User, on_delete=models.CASCADE)  # noqa: DJ012
     activation_key = models.CharField(('activation key'), max_length=32, unique=True, db_index=True)
     activation_timestamp = models.DateTimeField(default=None, null=True, blank=True)
 
@@ -887,7 +887,7 @@ class Registration(models.Model):
         log.info('User %s (%s) account is successfully activated.', self.user.username, self.user.email)
 
 
-class PendingNameChange(DeletableByUserValue, models.Model):
+class PendingNameChange(DeletableByUserValue, models.Model):  # noqa: DJ008
     """
     This model keeps track of pending requested changes to a user's name.
 
@@ -900,7 +900,7 @@ class PendingNameChange(DeletableByUserValue, models.Model):
     rationale = models.CharField(blank=True, max_length=1024)
 
 
-class PendingEmailChange(DeletableByUserValue, models.Model):
+class PendingEmailChange(DeletableByUserValue, models.Model):  # noqa: DJ008
     """
     This model keeps track of pending requested changes to a user's email address.
 
@@ -950,7 +950,7 @@ class PendingEmailChange(DeletableByUserValue, models.Model):
         return True
 
 
-class PendingSecondaryEmailChange(DeletableByUserValue, models.Model):
+class PendingSecondaryEmailChange(DeletableByUserValue, models.Model):  # noqa: DJ008
     """
     This model keeps track of pending requested changes to a user's secondary email address.
 
@@ -1069,7 +1069,7 @@ class LoginFailures(models.Model):
         except ObjectDoesNotExist:
             pass
 
-    def __str__(self):
+    def __str__(self):  # noqa: DJ012
         """Str -> Username: count - date."""
         return '{username}: {count} - {date}'.format(
             username=self.user.username,
@@ -1077,7 +1077,7 @@ class LoginFailures(models.Model):
             date=self.lockout_until.isoformat() if self.lockout_until else '-'
         )
 
-    class Meta:
+    class Meta:  # noqa: DJ012
         verbose_name = 'Login Failure'
         verbose_name_plural = 'Login Failures'
 
@@ -1094,11 +1094,11 @@ class CourseAccessRole(models.Model):
 
     objects = NoneToEmptyManager()
 
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)  # noqa: DJ012
     # blank org is for global group based roles such as course creator (may be deprecated)
     org = models.CharField(max_length=64, db_index=True, blank=True)
     # blank course_id implies org wide role
-    course_id = CourseKeyField(max_length=255, db_index=True, blank=True)
+    course_id = CourseKeyField(db_index=True, blank=True)
     role = models.CharField(max_length=64, db_index=True)
 
     class Meta:
@@ -1124,7 +1124,7 @@ class CourseAccessRole(models.Model):
             'user__profile'
         )
 
-    def __eq__(self, other):
+    def __eq__(self, other):  # noqa: DJ012
         """
         Overriding eq b/c the django impl relies on the primary key which requires fetch. sometimes we
         just want to compare roles w/o doing another fetch.
@@ -1156,7 +1156,7 @@ class CourseAccessRoleHistory(TimeStampedModel):
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     org = models.CharField(max_length=64, db_index=True, blank=True)
-    course_id = CourseKeyField(max_length=255, db_index=True, blank=True)
+    course_id = CourseKeyField(db_index=True, blank=True)
     role = models.CharField(max_length=64, db_index=True)
     action_type = models.CharField(max_length=10, choices=ACTION_CHOICES, db_index=True)
     changed_by = models.ForeignKey(
@@ -1468,7 +1468,7 @@ class LinkedInAddToProfileConfiguration(ConfigurationModel):
                 'issueMonth': certificate.created_date.month,
             })
 
-        return 'https://www.linkedin.com/profile/add?startTask=CERTIFICATION_NAME&{params}'.format(
+        return 'https://www.linkedin.com/profile/add?startTask=CERTIFICATION_NAME&{params}'.format(  # noqa: UP032
             params=urlencode(params)
         )
 
@@ -1533,7 +1533,7 @@ class EntranceExamConfiguration(models.Model):
     """
 
     user = models.ForeignKey(User, db_index=True, on_delete=models.CASCADE)
-    course_id = CourseKeyField(max_length=255, db_index=True)
+    course_id = CourseKeyField(db_index=True)
     created = models.DateTimeField(auto_now_add=True, null=True, db_index=True)
     updated = models.DateTimeField(auto_now=True, db_index=True)
 
@@ -1545,7 +1545,7 @@ class EntranceExamConfiguration(models.Model):
         unique_together = (('user', 'course_id'), )
 
     def __str__(self):
-        return "[EntranceExamConfiguration] {}: {} ({}) = {}".format(
+        return "[EntranceExamConfiguration] {}: {} ({}) = {}".format(  # noqa: UP032
             self.user, self.course_id, self.created, self.skip_entrance_exam
         )
 
@@ -1583,12 +1583,12 @@ class LanguageField(models.CharField):
             max_length=16,
             choices=settings.ALL_LANGUAGES,
             help_text=help_text,
-            *args,
+            *args,  # noqa: B026
             **kwargs
         )
 
 
-class LanguageProficiency(models.Model):
+class LanguageProficiency(models.Model):  # noqa: DJ008
     """
     Represents a user's language proficiency.
 
@@ -1603,7 +1603,7 @@ class LanguageProficiency(models.Model):
     class Meta:
         unique_together = (('code', 'user_profile'),)
 
-    user_profile = models.ForeignKey(UserProfile, db_index=True, related_name='language_proficiencies',
+    user_profile = models.ForeignKey(UserProfile, db_index=True, related_name='language_proficiencies',  # noqa: DJ012
                                      on_delete=models.CASCADE)
     code = models.CharField(
         max_length=16,
@@ -1613,7 +1613,7 @@ class LanguageProficiency(models.Model):
     )
 
 
-class SocialLink(models.Model):
+class SocialLink(models.Model):  # noqa: DJ008
     """
     Represents a URL connecting a particular social platform to a user's social profile.
 
@@ -1650,7 +1650,7 @@ class RegistrationCookieConfiguration(ConfigurationModel):
 
     def __str__(self):
         """Unicode representation of this config. """
-        return "UTM: {utm_name}; AFFILIATE: {affiliate_name}".format(
+        return "UTM: {utm_name}; AFFILIATE: {affiliate_name}".format(  # noqa: UP032
             utm_name=self.utm_cookie_name,
             affiliate_name=self.affiliate_cookie_name
         )
@@ -1672,7 +1672,7 @@ class UserAttribute(TimeStampedModel):
     value = models.CharField(max_length=255, help_text=_("Value of this user attribute."))
 
     def __str__(self):
-        return "[{username}] {name}: {value}".format(
+        return "[{username}] {name}: {value}".format(  # noqa: UP032
             name=self.name,
             value=self.value,
             username=self.user.username
@@ -1724,7 +1724,7 @@ class AccountRecoveryManager(models.Manager):
         super().get_queryset().update(is_active=True)
 
 
-class AccountRecovery(models.Model):
+class AccountRecovery(models.Model):  # noqa: DJ008
     """
     Model for storing information for user's account recovery in case of access loss.
 
@@ -1745,7 +1745,7 @@ class AccountRecovery(models.Model):
     class Meta:
         db_table = "auth_accountrecovery"
 
-    objects = AccountRecoveryManager()
+    objects = AccountRecoveryManager()  # noqa: DJ012
 
     def update_recovery_email(self, email):
         """
@@ -1836,7 +1836,7 @@ class UserCelebration(TimeStampedModel):
     STREAK_BREAK_LENGTH = 1
 
     def __str__(self):
-        return (
+        return (  # noqa: UP032
             '[UserCelebration] user: {}; last_day_of_streak {}; streak_length {}; longest_ever_streak {};'
         ).format(self.user.username, self.last_day_of_streak, self.streak_length, self.longest_ever_streak)
 
@@ -1986,7 +1986,7 @@ class UserPasswordToggleHistory(TimeStampedModel):
     .. no_pii:
     """
     user = models.ForeignKey(User, related_name='password_toggle_history', on_delete=models.CASCADE)
-    comment = models.CharField(max_length=255, help_text=_("Add a reason"), blank=True, null=True)
+    comment = models.CharField(max_length=255, help_text=_("Add a reason"), blank=True, null=True)  # noqa: DJ001
     disabled = models.BooleanField(default=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE)
 

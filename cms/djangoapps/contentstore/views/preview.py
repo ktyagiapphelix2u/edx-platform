@@ -4,8 +4,8 @@ import logging
 from functools import partial
 
 from django.conf import settings
-from django.core.cache import cache
 from django.contrib.auth.decorators import login_required
+from django.core.cache import cache
 from django.http import Http404, HttpResponseBadRequest
 from django.urls import reverse
 from django.utils.translation import gettext as _
@@ -18,35 +18,31 @@ from xblock.django.request import django_to_webob_request, webob_to_django_respo
 from xblock.exceptions import NoSuchHandlerError, NotFoundError, ProcessingError
 from xblock.runtime import KvsFieldData
 
+from cms.djangoapps.contentstore.toggles import individualize_anonymous_user_id
+from cms.djangoapps.xblock_config.models import StudioConfig
+from cms.lib.xblock.field_data import CmsFieldData
+from cms.lib.xblock.upstream_sync import UpstreamLink
+from common.djangoapps.edxmako.services import MakoService
+from common.djangoapps.edxmako.shortcuts import render_to_string
+from common.djangoapps.static_replace.services import ReplaceURLService
+from common.djangoapps.static_replace.wrapper import replace_urls_wrapper
+from common.djangoapps.student.models import anonymous_id_for_user
+from common.djangoapps.xblock_django.user_service import DjangoXBlockUserService
+from lms.djangoapps.lms_xblock.field_data import LmsFieldData
+from openedx.core.djangoapps.discussions.services import DiscussionConfigService
 from openedx.core.djangoapps.video_config.services import VideoConfigService
+from openedx.core.lib.cache_utils import CacheService
+from openedx.core.lib.license import wrap_with_license
+from openedx.core.lib.xblock_utils import request_token, wrap_fragment, wrap_xblock, wrap_xblock_aside
 from xmodule.contentstore.django import contentstore
 from xmodule.exceptions import NotFoundError as XModuleNotFoundError
 from xmodule.modulestore.django import XBlockI18nService, modulestore
 from xmodule.partitions.partitions_service import PartitionService
-from xmodule.services import SettingsService, TeamsConfigurationService
+from xmodule.services import SettingsService, TeamsConfigurationService, XQueueService
 from xmodule.studio_editable import has_author_view
-from xmodule.util.sandboxing import SandboxService
 from xmodule.util.builtin_assets import add_webpack_js_to_fragment
+from xmodule.util.sandboxing import SandboxService
 from xmodule.x_module import AUTHOR_VIEW, PREVIEW_VIEWS, STUDENT_VIEW, XModuleMixin
-from cms.djangoapps.xblock_config.models import StudioConfig
-from cms.djangoapps.contentstore.toggles import individualize_anonymous_user_id
-from cms.lib.xblock.field_data import CmsFieldData
-from cms.lib.xblock.upstream_sync import UpstreamLink
-from common.djangoapps.static_replace.services import ReplaceURLService
-from common.djangoapps.static_replace.wrapper import replace_urls_wrapper
-from common.djangoapps.student.models import anonymous_id_for_user
-from common.djangoapps.edxmako.shortcuts import render_to_string
-from common.djangoapps.edxmako.services import MakoService
-from common.djangoapps.xblock_django.user_service import DjangoXBlockUserService
-from lms.djangoapps.lms_xblock.field_data import LmsFieldData
-from openedx.core.lib.license import wrap_with_license
-from openedx.core.lib.cache_utils import CacheService
-from openedx.core.lib.xblock_utils import (
-    request_token,
-    wrap_fragment,
-    wrap_xblock,
-    wrap_xblock_aside
-)
 
 from ..utils import StudioPermissionsService, get_visibility_partition_info
 from .access import get_user_role
@@ -79,11 +75,11 @@ def preview_handler(request, usage_key_string, handler, suffix=''):
 
     except NoSuchHandlerError:
         log.exception("XBlock %s attempted to access missing handler %r", instance, handler)
-        raise Http404  # lint-amnesty, pylint: disable=raise-missing-from
+        raise Http404  # lint-amnesty, pylint: disable=raise-missing-from  # noqa: B904
 
     except (XModuleNotFoundError, NotFoundError):
         log.exception("Module indicating to user that request doesn't exist")
-        raise Http404  # lint-amnesty, pylint: disable=raise-missing-from
+        raise Http404  # lint-amnesty, pylint: disable=raise-missing-from  # noqa: B904
 
     except ProcessingError:
         log.warning("Module raised an error while processing AJAX request",
@@ -200,6 +196,17 @@ def _prepare_runtime_for_preview(request, block):
         # See the docstring of `DjangoXBlockUserService`.
         deprecated_anonymous_user_id = anonymous_id_for_user(request.user, None)
 
+    # NOTE: As of Ulmo, these services only apply to the preview views. If you want a service to be present in all
+    # Studio ModuleStoreRuntimes, then add it to load_services_for_studio.
+    # HISTORICAL CONTEXT: Until Ulmo, the `block.runtime._services.update(service)` call below would
+    # actually update the services dictionary for all runtimes, as `_services` was aliased between them.
+    # This caused a grading bug, under certain conditions, so it was fixed
+    # in https://github.com/openedx/openedx-platform/pull/37825; now, every runtime gets a fresh,
+    # independent copy of `_services`. That's good, except that some Studio code had become dependent
+    # on the bugged behavior and thus expected the "preview" services below to be present in all Studio runtimes.
+    # We fixed the known instance of that bugged assumption here:
+    # https://github.com/openedx/openedx-platform/pull/37900.
+    # This comment is left here as a note for future devs investigating similar bugs.
     services = {
         "studio_user_permissions": StudioPermissionsService(request.user),
         "i18n": XBlockI18nService,
@@ -217,6 +224,8 @@ def _prepare_runtime_for_preview(request, block):
         "cache": CacheService(cache),
         'replace_urls': ReplaceURLService,
         'video_config': VideoConfigService(),
+        'discussion_config_service': DiscussionConfigService(),
+        'xqueue': XQueueService(block),
     }
 
     block.runtime.get_block_for_descriptor = partial(_load_preview_block, request)
