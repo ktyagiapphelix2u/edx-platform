@@ -12,10 +12,10 @@ from common.djangoapps.student.models import (
     Registration,
     get_retired_email_by_email,
 )
+from openedx.core.djangoapps.user_api.accounts.utils import redact_user_social_auth_pii
 from openedx.core.djangolib.oauth2_retirement_utils import retire_dot_oauth2_models
 
 from ...models import BulkUserRetirementConfig, UserRetirementStatus
-from openedx.core.djangoapps.user_api.accounts.utils import redact_user_social_auth_pii
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +64,13 @@ class Command(BaseCommand):
 
         try:
             if isinstance(file_handler, str):
-                userinfo = open(file_handler, 'r')
+                userinfo = open(file_handler, 'r')  # noqa: UP015
             else:
                 userinfo = file_handler.open('r')
         except Exception as exc:
             error_message = f'Error while reading file: {exc}'
             logger.error(error_message)
-            raise CommandError(error_message)  # lint-amnesty, pylint: disable=raise-missing-from
+            raise CommandError(error_message)  # lint-amnesty, pylint: disable=raise-missing-from  # noqa: B904
 
         for record in userinfo:
             if isinstance(record, bytes):
@@ -168,13 +168,13 @@ class Command(BaseCommand):
         except KeyError:
             error_message = f'Username not specified {user}'
             logger.error(error_message)
-            raise CommandError(error_message)  # lint-amnesty, pylint: disable=raise-missing-from
+            raise CommandError(error_message)  # lint-amnesty, pylint: disable=raise-missing-from  # noqa: B904
         except user_model.DoesNotExist:
             error_message = f'The user "{user.username}" does not exist.'
             logger.error(error_message)
-            raise CommandError(error_message)  # lint-amnesty, pylint: disable=raise-missing-from
+            raise CommandError(error_message)  # lint-amnesty, pylint: disable=raise-missing-from  # noqa: B904
         except Exception as exc:  # pylint: disable=broad-except
             error_message = f'500 error deactivating account: {exc}'
             logger.error(error_message)
-            raise CommandError(error_message)  # lint-amnesty, pylint: disable=raise-missing-from
+            raise CommandError(error_message)  # lint-amnesty, pylint: disable=raise-missing-from  # noqa: B904
         logger.info("User successfully moved to the retirement pipeline")

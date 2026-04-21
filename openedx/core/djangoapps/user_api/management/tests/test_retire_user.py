@@ -2,6 +2,7 @@
 Test the retire_user management command
 """
 
+
 import csv
 import os
 
@@ -32,7 +33,7 @@ def generate_dummy_users():
         user = UserFactory.create(username=f"user{i}", email=f"user{i}@example.com")
         users.append(user.username)
         emails.append(user.email)
-    users_list = [{'username': user, 'email': email} for user, email in zip(users, emails)]
+    users_list = [{'username': user, 'email': email} for user, email in zip(users, emails)]  # noqa: B905
     return users_list
 
 
@@ -61,7 +62,8 @@ def remove_user_file():
 
 
 @skip_unless_lms
-def test_successful_retire_with_userfile(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument
+@pytest.mark.usefixtures('setup_retirement_states')
+def test_successful_retire_with_userfile():  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument
     user = UserFactory.create(username='user0', email="user0@example.com")
     username = user.username
     user_email = user.email
@@ -77,7 +79,8 @@ def test_successful_retire_with_userfile(setup_retirement_states):  # lint-amnes
 
 
 @skip_unless_lms
-def test_retire_user_with_usename_email_mismatch(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument
+@pytest.mark.usefixtures('setup_retirement_states')
+def test_retire_user_with_usename_email_mismatch():  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument
     create_user_file(True)
     with pytest.raises(CommandError, match=r'Could not find users with specified username and email '):
         call_command('retire_user', user_file=user_file)
@@ -85,7 +88,8 @@ def test_retire_user_with_usename_email_mismatch(setup_retirement_states):  # li
 
 
 @skip_unless_lms
-def test_successful_retire_with_username_email(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument
+@pytest.mark.usefixtures('setup_retirement_states')
+def test_successful_retire_with_username_email():  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument
     user = UserFactory.create(username='user0', email="user0@example.com")
     username = user.username
     user_email = user.email
@@ -99,7 +103,8 @@ def test_successful_retire_with_username_email(setup_retirement_states):  # lint
 
 
 @skip_unless_lms
-def test_retire_with_username_email_userfile(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument
+@pytest.mark.usefixtures('setup_retirement_states')
+def test_retire_with_username_email_userfile():  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument
     user = UserFactory.create(username='user0', email="user0@example.com")
     username = user.username
     user_email = user.email
@@ -110,7 +115,8 @@ def test_retire_with_username_email_userfile(setup_retirement_states):  # lint-a
 
 
 @skip_unless_lms
-def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument
+@pytest.mark.usefixtures('setup_retirement_states')
+def test_retire_user_redacts_sso_pii_before_deletion():  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument
     """
     Test that SSO PII is redacted before deletion during user retirement.
     """
@@ -142,7 +148,8 @@ def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  
 
 
 @skip_unless_lms
-def test_retire_user_redacts_multiple_sso_providers(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument
+@pytest.mark.usefixtures('setup_retirement_states')
+def test_retire_user_redacts_multiple_sso_providers():  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument
     """
     Test that multiple SSO providers have their PII redacted before deletion.
     """
