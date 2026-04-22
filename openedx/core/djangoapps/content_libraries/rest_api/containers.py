@@ -8,15 +8,15 @@ import logging
 from django.contrib.auth import get_user_model
 from django.db.transaction import non_atomic_requests
 from django.utils.decorators import method_decorator
-from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-
-from opaque_keys.edx.locator import LibraryLocatorV2, LibraryContainerLocator
+from drf_yasg.utils import swagger_auto_schema
+from opaque_keys.edx.locator import LibraryContainerLocator, LibraryLocatorV2
 from openedx_authz.constants import permissions as authz_permissions
-from openedx_learning.api import authoring as authoring_api
+from openedx_content import api as content_api
+from openedx_content import models_api as content_models
 from rest_framework.generics import GenericAPIView
 from rest_framework.response import Response
-from rest_framework.status import HTTP_204_NO_CONTENT, HTTP_200_OK
+from rest_framework.status import HTTP_200_OK, HTTP_204_NO_CONTENT
 
 from openedx.core.djangoapps.content_libraries import api, permissions
 from openedx.core.lib.api.view_utils import view_auth_classes
@@ -51,10 +51,10 @@ class LibraryContainersView(GenericAPIView):
         serializer = serializers.LibraryContainerMetadataSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        container_type = serializer.validated_data['container_type']
+        container_type_code = serializer.validated_data['container_type_code']
         container = api.create_container(
             library_key,
-            container_type,
+            container_cls=content_api.get_container_subclass(container_type_code),
             title=serializer.validated_data['display_name'],
             slug=serializer.validated_data.get('slug'),
             user_id=request.user.id,
@@ -190,7 +190,7 @@ class LibraryContainerChildrenView(GenericAPIView):
             permissions.CAN_VIEW_THIS_CONTENT_LIBRARY,
         )
         child_entities = api.get_container_children(container_key, published=published)
-        if container_key.container_type == api.ContainerType.Unit.value:
+        if container_key.container_type == content_models.Unit.type_code:
             data = serializers.LibraryXBlockMetadataSerializer(child_entities, many=True).data
         else:
             data = serializers.LibraryContainerMetadataSerializer(child_entities, many=True).data
@@ -200,7 +200,7 @@ class LibraryContainerChildrenView(GenericAPIView):
         self,
         request,
         container_key: LibraryContainerLocator,
-        action: authoring_api.ChildrenEntitiesAction,
+        action: content_api.ChildrenEntitiesAction,
     ):
         """
         Helper function to update children in container.
@@ -215,7 +215,7 @@ class LibraryContainerChildrenView(GenericAPIView):
 
         container = api.update_container_children(
             container_key,
-            children_ids=serializer.validated_data["usage_keys"],
+            children_keys=serializer.validated_data["usage_keys"],
             user_id=request.user.id,
             entities_action=action,
         )
@@ -237,7 +237,7 @@ class LibraryContainerChildrenView(GenericAPIView):
         return self._update_component_children(
             request,
             container_key,
-            action=authoring_api.ChildrenEntitiesAction.APPEND,
+            action=content_api.ChildrenEntitiesAction.APPEND,
         )
 
     @convert_exceptions
@@ -256,7 +256,7 @@ class LibraryContainerChildrenView(GenericAPIView):
         return self._update_component_children(
             request,
             container_key,
-            action=authoring_api.ChildrenEntitiesAction.REMOVE,
+            action=content_api.ChildrenEntitiesAction.REMOVE,
         )
 
     @convert_exceptions
@@ -275,7 +275,7 @@ class LibraryContainerChildrenView(GenericAPIView):
         return self._update_component_children(
             request,
             container_key,
-            action=authoring_api.ChildrenEntitiesAction.REPLACE,
+            action=content_api.ChildrenEntitiesAction.REPLACE,
         )
 
 

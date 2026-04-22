@@ -44,6 +44,11 @@ from xblock.fields import (
 from xblock.progress import Progress
 from xblock.scorable import ScorableXBlockMixin, Score, ShowCorrectness
 from xblocks_contrib.problem import ProblemBlock as _ExtractedProblemBlock
+from xblocks_contrib.problem.capa import responsetypes
+from xblocks_contrib.problem.capa.capa_problem import LoncapaProblem, LoncapaSystem
+from xblocks_contrib.problem.capa.inputtypes import Status
+from xblocks_contrib.problem.capa.responsetypes import LoncapaProblemError, ResponseError, StudentInputError
+from xblocks_contrib.problem.capa.util import convert_files_to_filenames, get_inner_html_from_xpath
 
 from common.djangoapps.xblock_django.constants import (
     ATTR_KEY_DEPRECATED_ANONYMOUS_USER_ID,
@@ -51,17 +56,10 @@ from common.djangoapps.xblock_django.constants import (
     ATTR_KEY_USER_IS_STAFF,
 )
 from openedx.core.djangolib.markup import HTML, Text
-from xmodule.capa import responsetypes
-from xmodule.capa.capa_problem import LoncapaProblem, LoncapaSystem
-from xmodule.capa.inputtypes import Status
-from xmodule.capa.responsetypes import LoncapaProblemError, ResponseError, StudentInputError
-from xmodule.capa.util import convert_files_to_filenames, get_inner_html_from_xpath
 from xmodule.raw_block import RawMixin
 from xmodule.util.builtin_assets import add_css_to_fragment, add_webpack_js_to_fragment
 from xmodule.x_module import XModuleMixin, XModuleToXBlockMixin, shim_xmodule_js
 from xmodule.xml_block import XmlMixin
-
-from .capa.xqueue_interface import XQueueService
 
 log = logging.getLogger("edx.courseware")
 
@@ -144,6 +142,7 @@ class Randomization(String):  # pylint: disable=too-few-public-methods
 @XBlock.needs("i18n")
 @XBlock.needs("cache")
 @XBlock.needs("sandbox")
+@XBlock.needs("xqueue")
 @XBlock.needs("replace_urls")
 @XBlock.wants("call_to_action")
 class _BuiltInProblemBlock(  # pylint: disable=too-many-public-methods,too-many-instance-attributes,too-many-ancestors
@@ -157,7 +156,7 @@ class _BuiltInProblemBlock(  # pylint: disable=too-many-public-methods,too-many-
     An XBlock representing a "problem".
 
     A problem contains zero or more respondable items, such as multiple choice,
-    numeric response, true/false, etc. See xmodule/capa/responsetypes.py
+    numeric response, true/false, etc. See xblocks_contrib/problem/capa/responsetypes.py
     for the full ensemble.
 
     The rendering logic of a problem is largely encapsulated within
@@ -371,7 +370,7 @@ class _BuiltInProblemBlock(  # pylint: disable=too-many-public-methods,too-many-
         """
         # self.score is initialized in self.lcp but in this method is accessed before self.lcp so just call it first.
         try:
-            self.lcp
+            self.lcp  # noqa: B018
         except Exception as err:  # pylint: disable=broad-exception-caught
             html = self.handle_fatal_lcp_error(err if show_detailed_errors else None)
         else:
@@ -414,7 +413,7 @@ class _BuiltInProblemBlock(  # pylint: disable=too-many-public-methods,too-many-
           <other request-specific values here > }
         """
         # self.score is initialized in self.lcp but in this method is accessed before self.lcp so just call it first.
-        self.lcp  # pylint: disable=pointless-statement
+        self.lcp  # pylint: disable=pointless-statement  # noqa: B018
         handlers = {
             "hint_button": self.hint_button,
             "problem_get": self.get_problem,
@@ -498,8 +497,7 @@ class _BuiltInProblemBlock(  # pylint: disable=too-many-public-methods,too-many-
 
     def grading_method_display_name(self) -> str | None:
         """
-        If the `ENABLE_GRADING_METHOD_IN_PROBLEMS` feature flag is enabled,
-        return the grading method, else return None.
+        Return the grading method
         """
         _ = self.runtime.service(self, "i18n").gettext
         display_name = {
@@ -508,18 +506,7 @@ class _BuiltInProblemBlock(  # pylint: disable=too-many-public-methods,too-many-
             GRADING_METHOD.HIGHEST_SCORE: _("Highest Score"),
             GRADING_METHOD.AVERAGE_SCORE: _("Average Score"),
         }
-        if self.is_grading_method_enabled:
-            return display_name[self.grading_method]
-        return None
-
-    @property
-    def is_grading_method_enabled(self) -> bool:
-        """
-        Returns whether the grading method feature is enabled. If the
-        feature is not enabled, the grading method field will not be shown in
-        Studio settings and the default grading method will be used.
-        """
-        return settings.FEATURES.get("ENABLE_GRADING_METHOD_IN_PROBLEMS", False)
+        return display_name[self.grading_method]
 
     @property
     def debug(self):
@@ -569,8 +556,6 @@ class _BuiltInProblemBlock(  # pylint: disable=too-many-public-methods,too-many-
                 ProblemBlock.matlab_api_key,
             ]
         )
-        if not self.is_grading_method_enabled:
-            non_editable_fields.append(ProblemBlock.grading_method)
         return non_editable_fields
 
     @property
@@ -832,7 +817,7 @@ class _BuiltInProblemBlock(  # pylint: disable=too-many-public-methods,too-many-
             lcp = self.new_lcp(self.get_state_for_lcp())
         except Exception as err:
             msg = f"cannot create LoncapaProblem {str(self.location)}: {err}"
-            raise LoncapaProblemError(msg).with_traceback(sys.exc_info()[2])
+            raise LoncapaProblemError(msg).with_traceback(sys.exc_info()[2])  # noqa: B904
 
         if self.score is None:
             self.set_score(self.score_from_lcp(lcp))
@@ -870,6 +855,7 @@ class _BuiltInProblemBlock(  # pylint: disable=too-many-public-methods,too-many-
 
         sandbox_service = self.runtime.service(self, "sandbox")
         cache_service = self.runtime.service(self, "cache")
+        xqueue_service = self.runtime.service(self, "xqueue")
 
         is_studio = getattr(self.runtime, "is_author_mode", False)
 
@@ -884,7 +870,7 @@ class _BuiltInProblemBlock(  # pylint: disable=too-many-public-methods,too-many-
             render_template=render_to_string,
             resources_fs=self.runtime.resources_fs,
             seed=seed,  # Why do we do this if we have self.seed?
-            xqueue=None if is_studio else XQueueService(self),
+            xqueue=None if is_studio else xqueue_service,
             matlab_api_key=self.matlab_api_key,
         )
 
@@ -1481,7 +1467,7 @@ class _BuiltInProblemBlock(  # pylint: disable=too-many-public-methods,too-many-
         True iff full points
         """
         # self.score is initialized in self.lcp but in this method is accessed before self.lcp so just call it first.
-        self.lcp  # pylint: disable=pointless-statement
+        self.lcp  # pylint: disable=pointless-statement  # noqa: B018
         return self.score.raw_earned == self.score.raw_possible
 
     def answer_available(self):  # pylint: disable=too-many-branches,too-many-return-statements
@@ -1834,8 +1820,7 @@ class _BuiltInProblemBlock(  # pylint: disable=too-many-public-methods,too-many-
 
             current_score = self.score_from_lcp(self.lcp)
             self.score_history.append(current_score)
-            if self.is_grading_method_enabled:
-                current_score = self.get_score_with_grading_method(current_score)
+            current_score = self.get_score_with_grading_method(current_score)
             self.set_score(current_score)
             self.set_last_submission_time()
 
@@ -2309,18 +2294,6 @@ class _BuiltInProblemBlock(  # pylint: disable=too-many-public-methods,too-many-
         """
         return self.score
 
-    def update_correctness(self):
-        """
-        Updates correct map of the LCP.
-        Operates by creating a new correctness map based on the current
-        state of the LCP, and updating the old correctness map of the LCP.
-        """
-        # Make sure that the attempt number is always at least 1 for grading purposes,
-        # even if the number of attempts have been reset and this problem is regraded.
-        self.lcp.context["attempt"] = max(self.attempts, 1)
-        new_correct_map = self.lcp.get_grade_from_current_answers(None)
-        self.lcp.correct_map.update(new_correct_map)
-
     def update_correctness_list(self):
         """
         Updates the `correct_map_history` and the `correct_map` of the LCP.
@@ -2332,7 +2305,7 @@ class _BuiltInProblemBlock(  # pylint: disable=too-many-public-methods,too-many-
         # even if the number of attempts have been reset and this problem is regraded.
         self.lcp.context["attempt"] = max(self.attempts, 1)
         new_correct_map_list = []
-        for student_answers, correct_map in zip(self.student_answers_history, self.correct_map_history):
+        for student_answers, correct_map in zip(self.student_answers_history, self.correct_map_history):  # noqa: B905
             new_correct_map = self.lcp.get_grade_from_current_answers(student_answers, correct_map)
             new_correct_map_list.append(new_correct_map)
         self.lcp.correct_map_history = new_correct_map_list
@@ -2343,13 +2316,9 @@ class _BuiltInProblemBlock(  # pylint: disable=too-many-public-methods,too-many-
         """
         Returns the score calculated from the current problem state.
 
-        If the grading method is enabled, the score is calculated based on the grading method.
+        The score is calculated based on the grading method.
         """
-        if self.is_grading_method_enabled:
-            return self.get_rescore_with_grading_method()
-        self.update_correctness()
-        new_score = self.lcp.calculate_score()
-        return Score(raw_earned=new_score["score"], raw_possible=new_score["total"])
+        return self.get_rescore_with_grading_method()
 
     def calculate_score_list(self):
         """
@@ -2496,5 +2465,17 @@ def randomization_bin(seed, problem_id):
     return int(r_hash.hexdigest()[:7], 16) % NUM_RANDOMIZATION_BINS
 
 
-ProblemBlock = _ExtractedProblemBlock if settings.USE_EXTRACTED_PROBLEM_BLOCK else _BuiltInProblemBlock
+ProblemBlock = None
+
+
+def reset_class():
+    """Reset class as per django settings flag"""
+    global ProblemBlock
+    ProblemBlock = (
+        _ExtractedProblemBlock if settings.USE_EXTRACTED_PROBLEM_BLOCK else _BuiltInProblemBlock
+    )
+    return ProblemBlock
+
+
+reset_class()
 ProblemBlock.__name__ = "ProblemBlock"
