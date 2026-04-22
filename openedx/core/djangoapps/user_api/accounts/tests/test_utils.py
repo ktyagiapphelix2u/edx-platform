@@ -8,12 +8,12 @@ from django.test import TestCase
 from django.test.utils import override_settings
 from social_django.models import UserSocialAuth
 
+from common.djangoapps.student.models import CourseEnrollment
+from common.djangoapps.student.tests.factories import UserFactory
 from openedx.core.djangoapps.user_api.accounts.utils import (
     redact_user_social_auth_pii,
     retrieve_last_sitewide_block_completed,
 )
-from common.djangoapps.student.models import CourseEnrollment
-from common.djangoapps.student.tests.factories import UserFactory
 from openedx.core.djangolib.testing.utils import skip_unless_lms
 from xmodule.modulestore.tests.django_utils import (
     SharedModuleStoreTestCase,  # lint-amnesty, pylint: disable=wrong-import-order

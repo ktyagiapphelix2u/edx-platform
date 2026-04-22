@@ -5,9 +5,6 @@ Test the retire_user management command
 import csv
 import os
 
-import csv
-import os
-
 import pytest
 from django.contrib.auth.models import User  # lint-amnesty, pylint: disable=imported-auth-user
 from django.core.management import CommandError, call_command

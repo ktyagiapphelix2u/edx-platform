@@ -12,10 +12,10 @@ from common.djangoapps.student.models import (
     Registration,
     get_retired_email_by_email,
 )
+from openedx.core.djangoapps.user_api.accounts.utils import redact_user_social_auth_pii
 from openedx.core.djangolib.oauth2_retirement_utils import retire_dot_oauth2_models
 
 from ...models import BulkUserRetirementConfig, UserRetirementStatus
-from openedx.core.djangoapps.user_api.accounts.utils import redact_user_social_auth_pii
 
 logger = logging.getLogger(__name__)
 
