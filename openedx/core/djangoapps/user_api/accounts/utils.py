@@ -196,6 +196,52 @@ def is_secondary_email_feature_enabled():
     return waffle.switch_is_active(ENABLE_SECONDARY_EMAIL_FEATURE_SWITCH)
 
 
+def redact_user_social_auth_pii(user_social_auth):
+    """
+    Redacts PII from a UserSocialAuth record before deletion.
+
+    This ensures that soft-deleted records in Snowflake do not retain sensitive user information.
+    When a user unlinks or retires, the SSO record is deleted from the LMS database but persists
+    as a soft-deleted record in Snowflake. This function redacts PII fields before deletion.
+
+    Args:
+        user_social_auth: UserSocialAuth instance to redact
+
+    Note:
+        This should be called before deleting any UserSocialAuth record, regardless of whether
+        the deletion is triggered by user retirement, manual unlinking, or any other method.
+        Since re-linking always creates a new entry, there is no need to preserve PII in deleted records.
+
+        This function is idempotent - it can be called multiple times safely and will only
+        redact once.
+    """
+    # Check if already redacted
+    if user_social_auth.uid == 'redacted@retired.invalid' and user_social_auth.extra_data == {}:
+        LOGGER.debug(
+            "UserSocialAuth record already redacted: user_id=%s, provider=%s, id=%s",
+            user_social_auth.user_id,
+            user_social_auth.provider,
+            user_social_auth.id
+        )
+        return
+
+    # Redact the UID field - this often contains email or other identifiable information
+    user_social_auth.uid = 'redacted@retired.invalid'
+
+    # Redact extra_data which may contain various PII fields from the SSO provider
+    user_social_auth.extra_data = {}
+
+    # Save the redacted record
+    user_social_auth.save()
+
+    LOGGER.info(
+        "Redacted PII for UserSocialAuth record: user_id=%s, provider=%s, id=%s",
+        user_social_auth.user_id,
+        user_social_auth.provider,
+        user_social_auth.id
+    )
+
+
 def create_retirement_request_and_deactivate_account(user):
     """
     Adds user to retirement queue, unlinks social auth accounts, changes user passwords
@@ -204,8 +250,10 @@ def create_retirement_request_and_deactivate_account(user):
     # Add user to retirement queue.
     UserRetirementStatus.create_retirement(user)
 
-    # Unlink LMS social auth accounts
-    UserSocialAuth.objects.filter(user_id=user.id).delete()
+    # Redact and unlink LMS social auth accounts
+    for social_auth in UserSocialAuth.objects.filter(user_id=user.id):
+        redact_user_social_auth_pii(social_auth)
+        social_auth.delete()
 
     # Change LMS password & email
     user.email = get_retired_email_by_email(user.email)
