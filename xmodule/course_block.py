@@ -17,12 +17,13 @@ from lazy import lazy
 from lxml import etree
 from path import Path as path
 from xblock.fields import Boolean, Date, Dict, Float, Integer, List, Scope, String
-from openedx.core.djangoapps.video_pipeline.models import VideoUploadsEnabledByDefault
+
 from openedx.core.djangoapps.video_config.sharing import (
     COURSE_VIDEO_SHARING_ALL_VIDEOS,
     COURSE_VIDEO_SHARING_NONE,
     COURSE_VIDEO_SHARING_PER_VIDEO,
 )
+from openedx.core.djangoapps.video_pipeline.models import VideoUploadsEnabledByDefault
 from openedx.core.lib.license import LicenseMixin
 from openedx.core.lib.teams_config import TeamsConfig  # lint-amnesty, pylint: disable=unused-import
 from xmodule import course_metadata_utils
@@ -167,7 +168,7 @@ class Textbook:  # lint-amnesty, pylint: disable=missing-class-docstring
                 # expire every 10 minutes
                 if age.seconds < 600:
                     return table_of_contents
-        except Exception as err:  # lint-amnesty, pylint: disable=broad-except, unused-variable
+        except Exception as err:  # lint-amnesty, pylint: disable=broad-except, unused-variable  # noqa: F841
             pass
 
         # Get the table of contents from S3
@@ -177,7 +178,7 @@ class Textbook:  # lint-amnesty, pylint: disable=missing-class-docstring
         except Exception as err:
             msg = f'Error {err}: Unable to retrieve textbook table of contents at {toc_url}'
             log.error(msg)
-            raise Exception(msg)  # lint-amnesty, pylint: disable=raise-missing-from
+            raise Exception(msg)  # lint-amnesty, pylint: disable=raise-missing-from  # noqa: B904
 
         # TOC is XML. Parse it
         try:
@@ -185,7 +186,7 @@ class Textbook:  # lint-amnesty, pylint: disable=missing-class-docstring
         except Exception as err:
             msg = f'Error {err}: Unable to parse XML for textbook table of contents at {toc_url}'
             log.error(msg)
-            raise Exception(msg)  # lint-amnesty, pylint: disable=raise-missing-from
+            raise Exception(msg)  # lint-amnesty, pylint: disable=raise-missing-from  # noqa: B904
 
         return table_of_contents
 
@@ -472,14 +473,6 @@ class CourseFields:  # lint-amnesty, pylint: disable=missing-class-docstring
         help=_(
             "Enter policy keys and values to enable the cohort feature, define automated student assignment to "
             "groups, or identify any course-wide discussion topics as private to cohort members."
-        ),
-        scope=Scope.settings
-    )
-    is_new = Boolean(
-        display_name=_("Course Is New"),
-        help=_(
-            "Enter true or false. If true, the course appears in the list of new courses, and a New! "
-            "badge temporarily appears next to the course image."
         ),
         scope=Scope.settings
     )
@@ -1135,7 +1128,7 @@ class CourseBlock(
             if not getattr(self, "tabs", []):
                 CourseTabList.initialize_default(self)
         except InvalidTabsException as err:
-            raise type(err)(f'{str(err)} For course: {str(self.id)}')  # lint-amnesty, pylint: disable=line-too-long
+            raise type(err)(f'{str(err)} For course: {str(self.id)}')  # lint-amnesty, pylint: disable=line-too-long  # noqa: B904
 
     def set_grading_policy(self, course_policy):
         """
@@ -1388,32 +1381,6 @@ class CourseBlock(
             return False
 
         return bool(config.get("always_cohort_inline_discussions", False))
-
-    @property
-    def is_newish(self):
-        """
-        Returns if the course has been flagged as new. If
-        there is no flag, return a heuristic value considering the
-        announcement and the start dates.
-        """
-        flag = self.is_new
-        if flag is None:
-            # Use a heuristic if the course has not been flagged
-            announcement, start, now = course_metadata_utils.sorting_dates(
-                self.start, self.advertised_start, self.announcement
-            )
-            if announcement and (now - announcement).days < 30:
-                # The course has been announced for less that month
-                return True
-            elif (now - start).days < 1:
-                # The course has not started yet
-                return True
-            else:
-                return False
-        elif isinstance(flag, str):
-            return flag.lower() in ['true', 'yes', 'y']
-        else:
-            return bool(flag)
 
     @property
     def sorting_score(self):
@@ -1670,7 +1637,7 @@ class CourseSummary:
             return course_metadata_utils.has_course_ended(self.end)
         except TypeError as e:
             log.warning(
-                "Course '{course_id}' has an improperly formatted end date '{end_date}'. Error: '{err}'.".format(
+                "Course '{course_id}' has an improperly formatted end date '{end_date}'. Error: '{err}'.".format(  # noqa: UP032  # pylint: disable=line-too-long
                     course_id=str(self.id), end_date=self.end, err=e
                 )
             )
