@@ -5,10 +5,12 @@ Test the retire_user management command
 
 import csv
 import os
+from unittest import mock
 
 import pytest
 from django.contrib.auth.models import User  # lint-amnesty, pylint: disable=imported-auth-user
 from django.core.management import CommandError, call_command
+from social_django.models import UserSocialAuth
 
 from common.djangoapps.student.tests.factories import UserFactory  # lint-amnesty, pylint: disable=wrong-import-order
 from openedx.core.djangoapps.user_api.accounts.tests.retirement_helpers import (  # lint-amnesty, pylint: disable=unused-import, wrong-import-order
@@ -107,3 +109,50 @@ def test_retire_with_username_email_userfile(setup_retirement_states):  # lint-a
     with pytest.raises(CommandError, match=r'You cannot use userfile option with username and user_email'):
         call_command('retire_user', user_file=user_file, username=username, user_email=user_email)
     remove_user_file()
+
+
+@skip_unless_lms
+def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument
+    user = UserFactory.create(username='sso-user', email='sso-user@example.com')
+    social_auth = UserSocialAuth.objects.create(
+        user=user,
+        provider='google-oauth2',
+        uid='sso-user@example.com',
+        extra_data={
+            'email': 'sso-user@example.com',
+            'name': 'SSO Test User',
+            'id': '123456789',
+        }
+    )
+    social_auth_id = social_auth.id
+
+    call_command('retire_user', username=user.username, user_email=user.email)
+
+    assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()
+    retired_user_status = UserRetirementStatus.objects.filter(original_username=user.username).first()
+    assert retired_user_status is not None
+    assert retired_user_status.original_email == 'sso-user@example.com'
+
+
+@skip_unless_lms
+def test_retire_user_calls_redaction_for_each_social_auth(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument
+    user = UserFactory.create(username='multi-sso-user', email='multi-sso@example.com')
+    UserSocialAuth.objects.create(
+        user=user,
+        provider='google-oauth2',
+        uid='google-multi@example.com',
+        extra_data={'email': 'google-multi@example.com', 'name': 'Google User'}
+    )
+    UserSocialAuth.objects.create(
+        user=user,
+        provider='tpa-saml',
+        uid='saml-multi@example.com',
+        extra_data={'email': 'saml-multi@example.com', 'name': 'SAML User', 'uid': 'saml-123'}
+    )
+
+    with mock.patch(
+        'openedx.core.djangoapps.user_api.management.commands.retire_user.redact_user_social_auth_pii'
+    ) as mock_redact:
+        call_command('retire_user', username=user.username, user_email=user.email)
+
+    assert mock_redact.call_count == 2

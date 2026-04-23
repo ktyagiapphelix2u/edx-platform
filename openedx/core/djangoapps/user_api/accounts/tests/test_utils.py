@@ -6,10 +6,15 @@ from completion import models
 from completion.test_utils import CompletionWaffleTestMixin
 from django.test import TestCase
 from django.test.utils import override_settings
+from social_django.models import UserSocialAuth
 
 from common.djangoapps.student.models import CourseEnrollment
 from common.djangoapps.student.tests.factories import UserFactory
-from openedx.core.djangoapps.user_api.accounts.utils import retrieve_last_sitewide_block_completed
+from openedx.core.djangoapps.user_api.accounts.utils import (
+    REDACTED_SOCIAL_AUTH_UID,
+    redact_user_social_auth_pii,
+    retrieve_last_sitewide_block_completed,
+)
 from openedx.core.djangolib.testing.utils import skip_unless_lms
 from xmodule.modulestore.tests.django_utils import (
     SharedModuleStoreTestCase,  # lint-amnesty, pylint: disable=wrong-import-order
@@ -133,3 +138,69 @@ class CompletionUtilsTestCase(SharedModuleStoreTestCase, CompletionWaffleTestMix
                )
 
         assert empty_block_url is None
+
+
+@skip_unless_lms
+class RedactUserSocialAuthPIITest(TestCase):
+    """
+    Tests for SSO PII redaction before deletion.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.user = UserFactory.create(username='testuser', email='testuser@example.com')
+
+    def create_social_auth(self, provider='google-oauth2', uid='user@example.com', extra_data=None):
+        if extra_data is None:
+            extra_data = {
+                'email': 'user@example.com',
+                'name': 'Test User',
+                'id': '123456789',
+            }
+        return UserSocialAuth.objects.create(
+            user=self.user,
+            provider=provider,
+            uid=uid,
+            extra_data=extra_data,
+        )
+
+    def test_redact_user_social_auth_pii(self):
+        social_auth = self.create_social_auth()
+
+        redact_user_social_auth_pii(social_auth)
+        social_auth.refresh_from_db()
+
+        assert social_auth.uid == REDACTED_SOCIAL_AUTH_UID
+        assert social_auth.extra_data == {}
+
+    def test_redact_user_social_auth_pii_idempotent(self):
+        social_auth = self.create_social_auth()
+
+        redact_user_social_auth_pii(social_auth)
+        redact_user_social_auth_pii(social_auth)
+        social_auth.refresh_from_db()
+
+        assert social_auth.uid == REDACTED_SOCIAL_AUTH_UID
+        assert social_auth.extra_data == {}
+
+    def test_redact_multiple_sso_providers(self):
+        google_auth = self.create_social_auth(
+            provider='google-oauth2',
+            uid='google@example.com',
+            extra_data={'email': 'google@example.com', 'name': 'Google User'}
+        )
+        saml_auth = self.create_social_auth(
+            provider='tpa-saml',
+            uid='saml@example.com',
+            extra_data={'email': 'saml@example.com', 'name': 'SAML User', 'uid': 'saml-uid'}
+        )
+
+        redact_user_social_auth_pii(google_auth)
+        redact_user_social_auth_pii(saml_auth)
+        google_auth.refresh_from_db()
+        saml_auth.refresh_from_db()
+
+        assert google_auth.uid == REDACTED_SOCIAL_AUTH_UID
+        assert google_auth.extra_data == {}
+        assert saml_auth.uid == REDACTED_SOCIAL_AUTH_UID
+        assert saml_auth.extra_data == {}

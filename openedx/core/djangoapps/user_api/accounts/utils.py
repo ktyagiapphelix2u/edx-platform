@@ -25,6 +25,7 @@ from ..models import UserRetirementStatus
 
 ENABLE_SECONDARY_EMAIL_FEATURE_SWITCH = 'enable_secondary_email_feature'
 LOGGER = logging.getLogger(__name__)
+REDACTED_SOCIAL_AUTH_UID = 'redacted@redacted.com'
 
 
 def validate_social_link(platform_name, new_social_link):
@@ -196,6 +197,33 @@ def is_secondary_email_feature_enabled():
     return waffle.switch_is_active(ENABLE_SECONDARY_EMAIL_FEATURE_SWITCH)
 
 
+def redact_user_social_auth_pii(user_social_auth):
+    """
+    Redact PII from a UserSocialAuth record before deletion.
+
+    Snowflake can retain deleted source rows as soft-deleted records, so sensitive
+    fields should be overwritten before deletion.
+    """
+    if not user_social_auth or not user_social_auth.pk:
+        return
+
+    update_fields = {}
+
+    if user_social_auth.uid != REDACTED_SOCIAL_AUTH_UID:
+        update_fields['uid'] = REDACTED_SOCIAL_AUTH_UID
+    if user_social_auth.extra_data:
+        update_fields['extra_data'] = {}
+
+    if not update_fields:
+        return
+
+    UserSocialAuth.objects.filter(pk=user_social_auth.pk).update(**update_fields)
+
+    # Keep instance in sync in case the caller reuses it.
+    for field_name, value in update_fields.items():
+        setattr(user_social_auth, field_name, value)
+
+
 def create_retirement_request_and_deactivate_account(user):
     """
     Adds user to retirement queue, unlinks social auth accounts, changes user passwords
@@ -204,8 +232,10 @@ def create_retirement_request_and_deactivate_account(user):
     # Add user to retirement queue.
     UserRetirementStatus.create_retirement(user)
 
-    # Unlink LMS social auth accounts
-    UserSocialAuth.objects.filter(user_id=user.id).delete()
+    # Redact and unlink LMS social auth accounts
+    for social_auth in UserSocialAuth.objects.filter(user_id=user.id):
+        redact_user_social_auth_pii(social_auth)
+        social_auth.delete()
 
     # Change LMS password & email
     user.email = get_retired_email_by_email(user.email)
