@@ -1026,7 +1026,7 @@ class AccountRetirementStatusView(ViewSet):
         }
         ```
 
-        Redacts a batch of retirement requests by redacting PII fields.
+        Redacts and then deletes a batch of retirement requests by username.
         """
         try:
             usernames = request.data["usernames"]
