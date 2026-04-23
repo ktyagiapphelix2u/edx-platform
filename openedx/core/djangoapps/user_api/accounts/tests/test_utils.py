@@ -151,6 +151,9 @@ class RedactUserSocialAuthPIITest(TestCase):
         self.user = UserFactory.create(username='testuser', email='testuser@example.com')
 
     def create_social_auth(self, provider='google-oauth2', uid='user@example.com', extra_data=None):
+        """
+        Helper method to create UserSocialAuth instances for testing.
+        """
         if extra_data is None:
             extra_data = {
                 'email': 'user@example.com',
@@ -165,6 +168,9 @@ class RedactUserSocialAuthPIITest(TestCase):
         )
 
     def test_redact_user_social_auth_pii(self):
+        """
+        Test that redact_user_social_auth_pii correctly redacts uid and extra_data fields.
+        """
         social_auth = self.create_social_auth()
 
         redact_user_social_auth_pii(social_auth)
@@ -174,6 +180,9 @@ class RedactUserSocialAuthPIITest(TestCase):
         assert social_auth.extra_data == {}
 
     def test_redact_user_social_auth_pii_idempotent(self):
+        """
+        Test that calling redact_user_social_auth_pii multiple times is idempotent.
+        """
         social_auth = self.create_social_auth()
 
         redact_user_social_auth_pii(social_auth)
@@ -184,6 +193,9 @@ class RedactUserSocialAuthPIITest(TestCase):
         assert social_auth.extra_data == {}
 
     def test_redact_multiple_sso_providers(self):
+        """
+        Test that redaction works correctly for multiple SSO providers (Google OAuth and SAML).
+        """
         google_auth = self.create_social_auth(
             provider='google-oauth2',
             uid='google@example.com',
