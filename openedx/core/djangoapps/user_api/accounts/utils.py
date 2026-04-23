@@ -201,7 +201,7 @@ def redact_user_social_auth_pii(user_social_auth):
     """
     Redact PII from a UserSocialAuth record before deletion.
 
-    Snowflake can retain deleted source rows as soft-deleted records, so sensitive
+    Downstream systems can retain deleted source rows as soft-deleted records, so sensitive
     fields should be overwritten before deletion.
     """
     if not user_social_auth or not user_social_auth.pk:
