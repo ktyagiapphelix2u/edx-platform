@@ -10,8 +10,8 @@ from social_django.models import UserSocialAuth
 from common.djangoapps.student.models import AccountRecovery, Registration, get_retired_email_by_email
 from openedx.core.djangolib.oauth2_retirement_utils import retire_dot_oauth2_models
 
-from ...models import BulkUserRetirementConfig, UserRetirementStatus
 from ...accounts.utils import redact_user_social_auth_pii
+from ...models import BulkUserRetirementConfig, UserRetirementStatus
 
 logger = logging.getLogger(__name__)
 

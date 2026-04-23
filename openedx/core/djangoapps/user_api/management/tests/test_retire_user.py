@@ -112,7 +112,7 @@ def test_retire_with_username_email_userfile(setup_retirement_states):  # lint-a
 
 
 @skip_unless_lms
-def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument
+def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument  # noqa: F811
     user = UserFactory.create(username='sso-user', email='sso-user@example.com')
     social_auth = UserSocialAuth.objects.create(
         user=user,
@@ -135,7 +135,7 @@ def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  
 
 
 @skip_unless_lms
-def test_retire_user_calls_redaction_for_each_social_auth(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument
+def test_retire_user_calls_redaction_for_each_social_auth(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument  # noqa: F811
     user = UserFactory.create(username='multi-sso-user', email='multi-sso@example.com')
     UserSocialAuth.objects.create(
         user=user,

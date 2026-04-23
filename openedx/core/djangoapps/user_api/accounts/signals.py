@@ -29,11 +29,11 @@ USER_RETIRE_LMS_MISC = Signal()
 def redact_social_auth_pii_before_deletion(sender, instance, **kwargs):  # pylint: disable=unused-argument
     """
     Signal handler to redact PII from UserSocialAuth records before deletion.
-    
+
     This ensures that when SSO records are deleted (either via user retirement, manual unlinking,
     or any other method), PII is redacted first. This prevents soft-deleted records in Snowflake
     from retaining sensitive user information.
-    
+
     Note: We call redact_user_social_auth_pii which saves the redacted data before the actual
     deletion happens. This is intentional - when Snowflake syncs, it will capture the redacted
     state before marking the record as deleted.
