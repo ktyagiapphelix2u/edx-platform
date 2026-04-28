@@ -37,14 +37,18 @@ def redact_social_auth_pii_before_deletion(sender, instance, **kwargs):  # pylin
     Note: We call redact_user_social_auth_pii which saves the redacted data before the actual
     deletion happens. This is intentional - downstream systems will capture the redacted
     state before marking the record as deleted.
+
+    If redaction fails, the exception is re-raised to prevent deletion from proceeding,
+    ensuring GDPR compliance and preventing PII leaks to downstream systems.
     """
     try:
         redact_user_social_auth_pii(instance)
     except Exception as e:  # pylint: disable=broad-except
-        # Log the error but don't prevent the deletion
         logger.exception(
             "Failed to redact PII for UserSocialAuth before deletion: user_id=%s, provider=%s, error=%s",
             instance.user_id,
             instance.provider,
             str(e)
         )
+        # Re-raise to prevent deletion from proceeding without redaction
+        raise

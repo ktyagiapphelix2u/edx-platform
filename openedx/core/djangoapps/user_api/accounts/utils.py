@@ -25,7 +25,6 @@ from ..models import UserRetirementStatus
 
 ENABLE_SECONDARY_EMAIL_FEATURE_SWITCH = 'enable_secondary_email_feature'
 LOGGER = logging.getLogger(__name__)
-REDACTED_SOCIAL_AUTH_UID = 'redacted@redacted.com'
 
 
 def validate_social_link(platform_name, new_social_link):
@@ -203,14 +202,18 @@ def redact_user_social_auth_pii(user_social_auth):
 
     Downstream systems can retain deleted source rows as soft-deleted records, so sensitive
     fields should be overwritten before deletion.
+
+    Uses a unique redacted UID per record (redacted_{pk}@retired.invalid) to avoid
+    IntegrityError from the unique_together constraint on (provider, uid).
     """
     if not user_social_auth or not user_social_auth.pk:
         return
 
     update_fields = {}
 
-    if user_social_auth.uid != REDACTED_SOCIAL_AUTH_UID:
-        update_fields['uid'] = REDACTED_SOCIAL_AUTH_UID
+    redacted_uid = f'redacted_{user_social_auth.pk}@retired.invalid'
+    if user_social_auth.uid != redacted_uid:
+        update_fields['uid'] = redacted_uid
     if user_social_auth.extra_data:
         update_fields['extra_data'] = {}
 

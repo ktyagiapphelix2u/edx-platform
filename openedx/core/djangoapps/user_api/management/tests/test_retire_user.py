@@ -115,6 +115,9 @@ def test_retire_with_username_email_userfile(setup_retirement_states):  # lint-a
 def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument  # noqa: F811
     """
     Test that SSO PII is redacted before UserSocialAuth records are deleted during retirement.
+    
+    This test verifies the order of operations by capturing the record's state
+    at the moment of deletion to ensure it was already redacted.
     """
     user = UserFactory.create(username='sso-user', email='sso-user@example.com')
     social_auth = UserSocialAuth.objects.create(
@@ -129,9 +132,31 @@ def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  
     )
     social_auth_id = social_auth.id
 
-    call_command('retire_user', username=user.username, user_email=user.email)
+    # Capture the state at the moment of deletion to verify redaction happened first
+    captured_state = {}
+    original_delete = UserSocialAuth.delete
 
+    def capture_state_and_delete(self):
+        """Wrapper to capture state before deletion."""
+        # Refresh from database to get the actual current state
+        self.refresh_from_db()
+        captured_state['uid'] = self.uid
+        captured_state['extra_data'] = dict(self.extra_data) if self.extra_data else {}
+        # Call original delete
+        return original_delete(self)
+
+    with mock.patch.object(UserSocialAuth, 'delete', capture_state_and_delete):
+        call_command('retire_user', username=user.username, user_email=user.email)
+
+    # Verify that at the moment of deletion, the record was already redacted
+    assert captured_state['uid'] == f'redacted_{social_auth_id}@retired.invalid', \
+        "UID should be redacted before deletion"
+    assert captured_state['extra_data'] == {}, \
+        "extra_data should be empty before deletion"
+
+    # Verify deletion completed
     assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()
+    
     retired_user_status = UserRetirementStatus.objects.filter(original_username=user.username).first()
     assert retired_user_status is not None
     assert retired_user_status.original_email == 'sso-user@example.com'
