@@ -115,7 +115,7 @@ def test_retire_with_username_email_userfile(setup_retirement_states):  # lint-a
 def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument  # noqa: F811
     """
     Test that SSO PII is redacted before UserSocialAuth records are deleted during retirement.
-    
+
     This test verifies the order of operations by capturing the record's state
     at the moment of deletion to ensure it was already redacted.
     """
@@ -156,7 +156,7 @@ def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  
 
     # Verify deletion completed
     assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()
-    
+
     retired_user_status = UserRetirementStatus.objects.filter(original_username=user.username).first()
     assert retired_user_status is not None
     assert retired_user_status.original_email == 'sso-user@example.com'
