@@ -5,12 +5,13 @@ from django.contrib.auth import get_user_model  # lint-amnesty, pylint: disable=
 from django.contrib.auth.models import User  # lint-amnesty, pylint: disable=imported-auth-user
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.db.models import CharField, Value
+from django.db.models.functions import Cast, Concat
 from social_django.models import UserSocialAuth
 
 from common.djangoapps.student.models import AccountRecovery, Registration, get_retired_email_by_email
 from openedx.core.djangolib.oauth2_retirement_utils import retire_dot_oauth2_models
 
-from ...accounts.utils import redact_user_social_auth_pii
 from ...models import BulkUserRetirementConfig, UserRetirementStatus
 
 logger = logging.getLogger(__name__)
@@ -146,9 +147,16 @@ class Command(BaseCommand):
                     # Add user to retirement queue.
                     UserRetirementStatus.create_retirement(user)
                     # Redact and unlink LMS social auth accounts
-                    for social_auth in UserSocialAuth.objects.filter(user_id=user.id):
-                        redact_user_social_auth_pii(social_auth)
-                        social_auth.delete()
+                    social_auth_queryset = UserSocialAuth.objects.filter(user_id=user.id)
+                    social_auth_queryset.update(
+                        uid=Concat(
+                            Value('redacted_'),
+                            Cast('id', output_field=CharField()),
+                            Value('@retired.invalid'),
+                        ),
+                        extra_data={},
+                    )
+                    social_auth_queryset.delete()
                     # Change LMS password & email
                     user.email = get_retired_email_by_email(user.email)
                     user.set_unusable_password()

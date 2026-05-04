@@ -5,11 +5,11 @@ Test the retire_user management command
 
 import csv
 import os
-from unittest import mock
 
 import pytest
 from django.contrib.auth.models import User  # lint-amnesty, pylint: disable=imported-auth-user
 from django.core.management import CommandError, call_command
+from django.db.models.signals import pre_delete
 from social_django.models import UserSocialAuth
 
 from common.djangoapps.student.tests.factories import UserFactory  # lint-amnesty, pylint: disable=wrong-import-order
@@ -132,27 +132,30 @@ def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  
     )
     social_auth_id = social_auth.id
 
-    # Capture the state at the moment of deletion to verify redaction happened first
-    captured_state = {}
-    original_delete = UserSocialAuth.delete
+    captured_states = []
 
-    def capture_state_and_delete(self):
-        """Wrapper to capture state before deletion."""
-        # Refresh from database to get the actual current state
-        self.refresh_from_db()
-        captured_state['uid'] = self.uid
-        captured_state['extra_data'] = dict(self.extra_data) if self.extra_data else {}
-        # Call original delete
-        return original_delete(self)
+    def capture_state_before_delete(sender, instance, **kwargs):  # pylint: disable=unused-argument
+        """Capture the database state seen by the pre_delete signal."""
+        instance.refresh_from_db()
+        captured_states.append({
+            'id': instance.id,
+            'uid': instance.uid,
+            'extra_data': dict(instance.extra_data) if instance.extra_data else {},
+        })
 
-    with mock.patch.object(UserSocialAuth, 'delete', capture_state_and_delete):
+    pre_delete.connect(capture_state_before_delete, sender=UserSocialAuth)
+    try:
         call_command('retire_user', username=user.username, user_email=user.email)
+    finally:
+        pre_delete.disconnect(capture_state_before_delete, sender=UserSocialAuth)
 
     # Verify that at the moment of deletion, the record was already redacted
-    assert captured_state['uid'] == f'redacted_{social_auth_id}@retired.invalid', \
-        "UID should be redacted before deletion"
-    assert captured_state['extra_data'] == {}, \
-        "extra_data should be empty before deletion"
+    assert captured_states == [{
+        'id': social_auth_id,
+        'uid': f'redacted_{social_auth_id}@retired.invalid',
+        'extra_data': {},
+    }], \
+        "SSO records should be redacted before deletion"
 
     # Verify deletion completed
     assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()
@@ -163,27 +166,38 @@ def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  
 
 
 @skip_unless_lms
-def test_retire_user_calls_redaction_for_each_social_auth(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument  # noqa: F811
+def test_retire_user_redacts_each_social_auth_before_bulk_deletion(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument  # noqa: F811
     """
-    Test that redact_user_social_auth_pii is called for each UserSocialAuth record during retirement.
+    Test that each UserSocialAuth record is redacted before bulk deletion during retirement.
     """
     user = UserFactory.create(username='multi-sso-user', email='multi-sso@example.com')
-    UserSocialAuth.objects.create(
+    google_auth = UserSocialAuth.objects.create(
         user=user,
         provider='google-oauth2',
         uid='google-multi@example.com',
         extra_data={'email': 'google-multi@example.com', 'name': 'Google User'}
     )
-    UserSocialAuth.objects.create(
+    saml_auth = UserSocialAuth.objects.create(
         user=user,
         provider='tpa-saml',
         uid='saml-multi@example.com',
         extra_data={'email': 'saml-multi@example.com', 'name': 'SAML User', 'uid': 'saml-123'}
     )
 
-    with mock.patch(
-        'openedx.core.djangoapps.user_api.management.commands.retire_user.redact_user_social_auth_pii'
-    ) as mock_redact:
-        call_command('retire_user', username=user.username, user_email=user.email)
+    captured_states = []
 
-    assert mock_redact.call_count == 2
+    def capture_state_before_delete(sender, instance, **kwargs):  # pylint: disable=unused-argument
+        """Capture the database state seen by the pre_delete signal."""
+        instance.refresh_from_db()
+        captured_states.append((instance.provider, instance.uid, dict(instance.extra_data) if instance.extra_data else {}))
+
+    pre_delete.connect(capture_state_before_delete, sender=UserSocialAuth)
+    try:
+        call_command('retire_user', username=user.username, user_email=user.email)
+    finally:
+        pre_delete.disconnect(capture_state_before_delete, sender=UserSocialAuth)
+
+    assert sorted(captured_states) == sorted([
+        ('google-oauth2', f'redacted_{google_auth.id}@retired.invalid', {}),
+        ('tpa-saml', f'redacted_{saml_auth.id}@retired.invalid', {}),
+    ])

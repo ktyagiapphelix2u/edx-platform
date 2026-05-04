@@ -11,6 +11,8 @@ import waffle  # lint-amnesty, pylint: disable=invalid-django-waffle-import
 from completion.models import BlockCompletion
 from completion.waffle import ENABLE_COMPLETION_TRACKING_SWITCH
 from django.conf import settings
+from django.db.models import CharField, Value
+from django.db.models.functions import Cast, Concat
 from django.utils.translation import gettext as _
 from edx_django_utils.user import generate_password
 from social_django.models import UserSocialAuth
@@ -236,9 +238,16 @@ def create_retirement_request_and_deactivate_account(user):
     UserRetirementStatus.create_retirement(user)
 
     # Redact and unlink LMS social auth accounts
-    for social_auth in UserSocialAuth.objects.filter(user_id=user.id):
-        redact_user_social_auth_pii(social_auth)
-        social_auth.delete()
+    social_auth_queryset = UserSocialAuth.objects.filter(user_id=user.id)
+    social_auth_queryset.update(
+        uid=Concat(
+            Value('redacted_'),
+            Cast('id', output_field=CharField()),
+            Value('@retired.invalid'),
+        ),
+        extra_data={},
+    )
+    social_auth_queryset.delete()
 
     # Change LMS password & email
     user.email = get_retired_email_by_email(user.email)
