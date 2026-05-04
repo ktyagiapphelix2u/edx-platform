@@ -189,7 +189,8 @@ def test_retire_user_redacts_each_social_auth_before_bulk_deletion(setup_retirem
     def capture_state_before_delete(sender, instance, **kwargs):  # pylint: disable=unused-argument
         """Capture the database state seen by the pre_delete signal."""
         instance.refresh_from_db()
-        captured_states.append((instance.provider, instance.uid, dict(instance.extra_data) if instance.extra_data else {}))
+        extra = dict(instance.extra_data) if instance.extra_data else {}
+        captured_states.append((instance.provider, instance.uid, extra))
 
     pre_delete.connect(capture_state_before_delete, sender=UserSocialAuth)
     try:
