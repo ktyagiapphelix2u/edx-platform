@@ -10,10 +10,10 @@ from zoneinfo import ZoneInfo
 import ddt
 from django.contrib.auth.models import User  # lint-amnesty, pylint: disable=imported-auth-user
 from django.contrib.sites.models import Site
-from django.core.cache import cache
 from django.core import mail
-from django.db.models.signals import pre_delete
+from django.core.cache import cache
 from django.db import connection
+from django.db.models.signals import pre_delete
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
