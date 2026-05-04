@@ -913,19 +913,25 @@ class PendingEmailChange(DeletableByUserValue, models.Model):  # noqa: DJ008
     activation_key = models.CharField(('activation key'), max_length=32, unique=True, db_index=True)
 
     @classmethod
-    def redact_pending_email_by_user_value(cls, value, field):
+    def delete_by_user_value(cls, value, field):
         """
-        Redact pending email change fields for records matching ``field=value``.
-        This method is intended for retirement flows where downstream systems
-        may keep soft-deleted snapshots of these rows.
+        Deletes instances of this model where ``field`` equals ``value``.
+
+        Automatically redacts new_email before deletion to ensure PII is cleared.
+        Uses bulk ORM update for efficiency.
+
+        Returns True if any instances were deleted.
+        Returns False otherwise.
         """
         filter_kwargs = {field: value}
         records_matching_user_value = cls.objects.filter(**filter_kwargs)
+
         if not records_matching_user_value.exists():
             return False
-        for record in records_matching_user_value:
-            record.new_email = get_retired_email_by_email(record.new_email)
-            record.save(update_fields=['new_email'])
+
+        # Redact new_email before deletion using bulk update
+        records_matching_user_value.update(new_email='redacted@redacted.invalid')
+        records_matching_user_value.delete()
         return True
 
     def request_change(self, email):

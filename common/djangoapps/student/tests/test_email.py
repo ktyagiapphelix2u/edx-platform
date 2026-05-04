@@ -10,6 +10,7 @@ from django.conf import settings
 from django.contrib.auth.models import User  # lint-amnesty, pylint: disable=imported-auth-user
 from django.core import mail
 from django.db import transaction
+from django.db.models.signals import pre_delete
 from django.http import HttpResponse
 from django.test import TransactionTestCase, override_settings
 from django.test.client import RequestFactory
@@ -607,6 +608,34 @@ class EmailChangeConfirmationTests(EmailTestMixin, EmailTemplateTagMixin, CacheI
         assert self.user.email == meta['old_emails'][0][0]
         assert self.pending_change_request.new_email == User.objects.get(username=self.user.username).email
         assert PendingEmailChange.objects.count() == 0
+
+    @skip_unless_lms
+    @patch('common.djangoapps.student.signals.receivers.EmailChangeMiddleware.register_email_change')
+    @patch('common.djangoapps.student.views.management.ace')
+    def test_successful_email_change_redacts_pending_email_before_delete(self, ace_mail, mock_register):  # pylint: disable=unused-argument
+        original_email = self.user.email
+        expected_new_email = self.pending_change_request.new_email
+        captured_state = {}
+
+        def capture_before_delete(sender, instance, **kwargs):
+            captured_state['new_email'] = instance.new_email
+
+        ace_mail.send.side_effect = [None, None]
+        pre_delete.connect(capture_before_delete, sender=PendingEmailChange)
+        try:
+            response = confirm_email_change(self.request, self.key)
+        finally:
+            pre_delete.disconnect(capture_before_delete, sender=PendingEmailChange)
+
+        assert response.status_code == 200
+        assert mock_render_to_response('email_change_successful.html', {
+            'old_email': original_email,
+            'new_email': expected_new_email,
+        }).content.decode('utf-8') == response.content.decode('utf-8')
+        assert captured_state['new_email'] == 'redacted@redacted.invalid'
+        assert User.objects.get(username=self.user.username).email == expected_new_email
+        assert PendingEmailChange.objects.count() == 0
+        assert ace_mail.send.call_count == 2
 
     @patch('common.djangoapps.student.views.PendingEmailChange.objects.get', Mock(side_effect=TestException))
     def test_always_rollback(self):

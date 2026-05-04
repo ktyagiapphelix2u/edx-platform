@@ -11,6 +11,7 @@ from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, User  # lint-amnesty, pylint: disable=imported-auth-user
 from django.core.cache import cache
 from django.db.models.functions import Lower
+from django.db.models.signals import pre_delete
 from django.test import TestCase, override_settings
 from edx_toggles.toggles.testutils import override_waffle_flag
 from freezegun import freeze_time
@@ -30,7 +31,6 @@ from common.djangoapps.student.models import (
     UserAttribute,
     UserCelebration,
     UserProfile,
-    get_retired_email_by_email,
 )
 from common.djangoapps.student.models_api import confirm_name_change, do_name_change_request, get_name
 from common.djangoapps.student.tests.factories import AccountRecoveryFactory, CourseEnrollmentFactory, UserFactory
@@ -601,24 +601,33 @@ class PendingEmailChangeTests(SharedModuleStoreTestCase):
         assert not record_was_deleted
         assert 1 == len(PendingEmailChange.objects.all())
 
-    def test_redact_by_user_redacts_pending_email_change_fields(self):
-        original_new_email = self.email_change.new_email
-        original_activation_key = self.email_change.activation_key
-        expected_retired_email = get_retired_email_by_email(original_new_email)
-        record_was_redacted = PendingEmailChange.redact_pending_email_by_user_value(self.user, field='user')
-        assert record_was_redacted
-        self.email_change.refresh_from_db()
-        assert self.email_change.new_email == expected_retired_email
-        assert self.email_change.activation_key == original_activation_key
+    def test_delete_by_user_value_redacts_pending_email_before_deletion(self):
+        """
+        Verify that delete_by_user_value redacts new_email before deletion.
+        """
+        expected_redacted_email = 'redacted@redacted.invalid'
+        captured_state = {}
 
-    def test_redact_by_user_no_effect_for_user_with_no_email_change(self):
-        original_new_email = self.email_change.new_email
-        original_activation_key = self.email_change.activation_key
-        record_was_redacted = PendingEmailChange.redact_pending_email_by_user_value(self.user2, field='user')
-        assert not record_was_redacted
-        self.email_change.refresh_from_db()
-        assert self.email_change.new_email == original_new_email
-        assert self.email_change.activation_key == original_activation_key
+        def capture_before_delete(sender, instance, **kwargs):
+            """
+            Capture email and activation_key before deletion.
+            """
+            captured_state['new_email'] = instance.new_email
+            captured_state['activation_key'] = instance.activation_key
+
+        pre_delete.connect(capture_before_delete, sender=PendingEmailChange)
+        try:
+            assert PendingEmailChange.objects.filter(user=self.user).exists()
+
+            record_was_deleted = PendingEmailChange.delete_by_user_value(self.user, field='user')
+            assert record_was_deleted
+
+            assert captured_state['new_email'] == expected_redacted_email
+            assert captured_state['activation_key'] == self.email_change.activation_key
+
+            assert not PendingEmailChange.objects.filter(user=self.user).exists()
+        finally:
+            pre_delete.disconnect(capture_before_delete, sender=PendingEmailChange)
 
 
 class TestCourseEnrollmentAllowed(ModuleStoreTestCase):  # lint-amnesty, pylint: disable=missing-class-docstring
