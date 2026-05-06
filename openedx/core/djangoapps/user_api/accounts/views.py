@@ -1046,18 +1046,13 @@ class AccountRetirementStatusView(ViewSet):
             if len(usernames) != len(retirements):
                 raise UserRetirementStatus.DoesNotExist("Not all usernames exist in the COMPLETE state.")
 
-            # Redact PII fields first, then delete. In case an ETL tool is syncing data
-            # to a downstream data warehouse, and treats the deletes as soft-deletes,
-            # the data will have first been redacted, protecting the sensitive PII.
-            # Get the IDs of the retirements to update/delete
+            # Redact PII first, then delete. Protects against ETL soft-delete scenarios.
             retirement_ids = list(retirements.values_list('id', flat=True))
-            # Update by IDs
             UserRetirementStatus.objects.filter(id__in=retirement_ids).update(
                 original_username=redacted_username,
                 original_email=redacted_email,
                 original_name=redacted_name
             )
-            # Delete by IDs
             UserRetirementStatus.objects.filter(id__in=retirement_ids, current_state=complete_state).delete()
 
             return Response(status=status.HTTP_204_NO_CONTENT)
@@ -1170,9 +1165,7 @@ class AccountRetirementView(ViewSet):
 
             self.retire_entitlement_support_detail(user)
 
-            # Retire misc. models that may contain PII of this user.
-            # PendingEmailChange.delete_by_user_value() automatically redacts new_email
-            # before deletion because downstream systems may preserve soft-deleted snapshots.
+            # Retire misc. PII models. PendingEmailChange redacts before deletion for downstream safety.
             PendingEmailChange.delete_by_user_value(user, field="user")
             UserOrgTag.delete_by_user_value(user, field="user")
 

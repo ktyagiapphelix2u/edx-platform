@@ -605,7 +605,6 @@ class PendingEmailChangeTests(SharedModuleStoreTestCase):
         """
         Verify that delete_by_user_value redacts new_email before deletion.
         """
-        expected_redacted_email = 'redacted@redacted.invalid'
         captured_state = {}
 
         def capture_before_delete(sender, instance, **kwargs):
@@ -622,7 +621,7 @@ class PendingEmailChangeTests(SharedModuleStoreTestCase):
             record_was_deleted = PendingEmailChange.delete_by_user_value(self.user, field='user')
             assert record_was_deleted
 
-            assert captured_state['new_email'] == expected_redacted_email
+            assert captured_state['new_email'] == 'redacted@redacted.invalid'
             assert captured_state['activation_key'] == self.email_change.activation_key
 
             assert not PendingEmailChange.objects.filter(user=self.user).exists()

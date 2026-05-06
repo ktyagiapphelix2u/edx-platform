@@ -620,7 +620,6 @@ class EmailChangeConfirmationTests(EmailTestMixin, EmailTemplateTagMixin, CacheI
         def capture_before_delete(sender, instance, **kwargs):
             captured_state['new_email'] = instance.new_email
 
-        ace_mail.send.side_effect = [None, None]
         pre_delete.connect(capture_before_delete, sender=PendingEmailChange)
         try:
             response = confirm_email_change(self.request, self.key)

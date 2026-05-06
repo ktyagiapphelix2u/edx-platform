@@ -1468,11 +1468,7 @@ class TestAccountRetirementPost(RetirementTestCase):
 
     @mock.patch('openedx.core.djangoapps.user_api.accounts.views.get_profile_image_names')
     @mock.patch('openedx.core.djangoapps.user_api.accounts.views.remove_profile_images')
-    def test_retire_user(
-        self,
-        mock_remove_profile_images,
-        mock_get_profile_image_names,
-    ):
+    def test_retire_user(self, mock_remove_profile_images, mock_get_profile_image_names):
         data = {'username': self.original_username}
         self.post_and_assert_status(data)
 
@@ -1519,7 +1515,6 @@ class TestAccountRetirementPost(RetirementTestCase):
         """
         Verify that delete_by_user_value redacts new_email using bulk update before deletion.
         """
-        expected_redacted_email = 'redacted@redacted.invalid'
         captured_state = {}
 
         def capture_before_delete(sender, instance, **kwargs):
@@ -1537,7 +1532,7 @@ class TestAccountRetirementPost(RetirementTestCase):
             self.post_and_assert_status(data)
 
             # Verify the redaction happened before deletion
-            assert captured_state.get('new_email') == expected_redacted_email
+            assert captured_state['new_email'] == 'redacted@redacted.invalid'
 
             # Verify the record was deleted
             assert not PendingEmailChange.objects.filter(user=self.test_user).exists()
