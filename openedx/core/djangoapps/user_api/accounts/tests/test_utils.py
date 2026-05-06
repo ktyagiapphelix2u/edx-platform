@@ -242,6 +242,8 @@ class RedactUserSocialAuthPIITest(TestCase):
                 extra_data={'email': 'saml@example.com', 'name': 'SAML User', 'uid': 'saml-uid'}
             ),
         ]
+        # Save IDs before deletion (they become None after delete)
+        auth_ids = [auth.pk for auth in auths]
         captured_states = []
 
         def capture_state_before_delete(sender, instance, **kwargs):  # pylint: disable=unused-argument
@@ -258,6 +260,6 @@ class RedactUserSocialAuthPIITest(TestCase):
             pre_delete.disconnect(capture_state_before_delete, sender=UserSocialAuth)
 
         assert sorted(captured_states) == sorted([
-            ('google-oauth2', f'redacted_{auths[0].pk}@retired.invalid', {}),
-            ('tpa-saml', f'redacted_{auths[1].pk}@retired.invalid', {}),
+            ('google-oauth2', f'redacted_{auth_ids[0]}@retired.invalid', {}),
+            ('tpa-saml', f'redacted_{auth_ids[1]}@retired.invalid', {}),
         ])

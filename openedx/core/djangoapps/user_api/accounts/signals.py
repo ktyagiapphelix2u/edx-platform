@@ -26,17 +26,10 @@ USER_RETIRE_LMS_MISC = Signal()
 @receiver(pre_delete, sender=UserSocialAuth)
 def redact_social_auth_pii_before_deletion(sender, instance, **kwargs):  # pylint: disable=unused-argument
     """
-    Signal handler to redact PII from UserSocialAuth records before deletion.
+    Redacts PII fields (uid, extra_data) before UserSocialAuth deletion.
 
-    This ensures that when SSO records are deleted (either via user retirement, manual unlinking,
-    or any other method), PII is redacted first. This prevents downstream systems that maintain
-    soft-deleted records from retaining sensitive user information.
-
-    The redacted state is saved before the actual deletion happens. This is intentional -
-    downstream systems will capture the redacted state before marking the record as deleted.
-
-    If redaction fails, the exception is re-raised to prevent deletion from proceeding,
-    ensuring GDPR compliance and preventing PII leaks to downstream systems.
+    Replaces uid with 'redacted_{pk}@retired.invalid' and clears extra_data.
+    Blocks deletion if redaction fails to prevent PII leaks to downstream systems.
     """
     if not instance or not instance.pk:
         return

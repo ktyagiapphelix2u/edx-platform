@@ -183,6 +183,9 @@ def test_retire_user_redacts_each_social_auth_before_bulk_deletion(setup_retirem
         uid='saml-multi@example.com',
         extra_data={'email': 'saml-multi@example.com', 'name': 'SAML User', 'uid': 'saml-123'}
     )
+    # Save IDs before deletion (they become None after delete)
+    google_auth_id = google_auth.id
+    saml_auth_id = saml_auth.id
 
     captured_states = []
 
@@ -199,6 +202,6 @@ def test_retire_user_redacts_each_social_auth_before_bulk_deletion(setup_retirem
         pre_delete.disconnect(capture_state_before_delete, sender=UserSocialAuth)
 
     assert sorted(captured_states) == sorted([
-        ('google-oauth2', f'redacted_{google_auth.id}@retired.invalid', {}),
-        ('tpa-saml', f'redacted_{saml_auth.id}@retired.invalid', {}),
+        ('google-oauth2', f'redacted_{google_auth_id}@retired.invalid', {}),
+        ('tpa-saml', f'redacted_{saml_auth_id}@retired.invalid', {}),
     ])
