@@ -930,7 +930,7 @@ class PendingEmailChange(DeletableByUserValue, models.Model):  # noqa: DJ008
             return False
 
         # Redact new_email before deletion using bulk update
-        records_matching_user_value.update(new_email='redacted@redacted.invalid')
+        records_matching_user_value.update(new_email='redacted@retired.invalid')
         records_matching_user_value.delete()
         return True
 

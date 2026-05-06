@@ -621,7 +621,7 @@ class PendingEmailChangeTests(SharedModuleStoreTestCase):
             record_was_deleted = PendingEmailChange.delete_by_user_value(self.user, field='user')
             assert record_was_deleted
 
-            assert captured_state['new_email'] == 'redacted@redacted.invalid'
+            assert captured_state['new_email'] == 'redacted@retired.invalid'
             assert captured_state['activation_key'] == self.email_change.activation_key
 
             assert not PendingEmailChange.objects.filter(user=self.user).exists()

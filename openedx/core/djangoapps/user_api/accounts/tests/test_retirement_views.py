@@ -1532,7 +1532,7 @@ class TestAccountRetirementPost(RetirementTestCase):
             self.post_and_assert_status(data)
 
             # Verify the redaction happened before deletion
-            assert captured_state['new_email'] == 'redacted@redacted.invalid'
+            assert captured_state['new_email'] == 'redacted@retired.invalid'
 
             # Verify the record was deleted
             assert not PendingEmailChange.objects.filter(user=self.test_user).exists()

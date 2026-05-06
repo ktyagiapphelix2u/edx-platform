@@ -631,7 +631,7 @@ class EmailChangeConfirmationTests(EmailTestMixin, EmailTemplateTagMixin, CacheI
             'old_email': original_email,
             'new_email': expected_new_email,
         }).content.decode('utf-8') == response.content.decode('utf-8')
-        assert captured_state['new_email'] == 'redacted@redacted.invalid'
+        assert captured_state['new_email'] == 'redacted@retired.invalid'
         assert User.objects.get(username=self.user.username).email == expected_new_email
         assert PendingEmailChange.objects.count() == 0
         assert ace_mail.send.call_count == 2
