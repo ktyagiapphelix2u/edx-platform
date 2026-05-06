@@ -8,8 +8,6 @@ from django.db.models.signals import pre_delete
 from django.dispatch import Signal, receiver
 from social_django.models import UserSocialAuth
 
-from .utils import redact_user_social_auth_pii
-
 logger = logging.getLogger(__name__)
 
 # Signal to retire a user from LMS-initiated mailings (course mailings, etc)
@@ -34,21 +32,33 @@ def redact_social_auth_pii_before_deletion(sender, instance, **kwargs):  # pylin
     or any other method), PII is redacted first. This prevents downstream systems that maintain
     soft-deleted records from retaining sensitive user information.
 
-    Note: We call redact_user_social_auth_pii which saves the redacted data before the actual
-    deletion happens. This is intentional - downstream systems will capture the redacted
-    state before marking the record as deleted.
+    The redacted state is saved before the actual deletion happens. This is intentional -
+    downstream systems will capture the redacted state before marking the record as deleted.
 
     If redaction fails, the exception is re-raised to prevent deletion from proceeding,
     ensuring GDPR compliance and preventing PII leaks to downstream systems.
     """
+    if not instance or not instance.pk:
+        return
+
     try:
-        redact_user_social_auth_pii(instance)
-    except Exception as e:  # pylint: disable=broad-except
+        update_fields = {}
+        redacted_uid = f'redacted_{instance.pk}@retired.invalid'
+
+        if instance.uid != redacted_uid:
+            update_fields['uid'] = redacted_uid
+        if instance.extra_data:
+            update_fields['extra_data'] = {}
+
+        if not update_fields:
+            return
+
+        UserSocialAuth.objects.filter(pk=instance.pk).update(**update_fields)
+    except Exception:  # pylint: disable=broad-except
         logger.exception(
-            "Failed to redact PII for UserSocialAuth before deletion: user_id=%s, provider=%s, error=%s",
+            "Failed to redact PII for UserSocialAuth before deletion: user_id=%s, provider=%s",
             instance.user_id,
             instance.provider,
-            str(e)
         )
         # Re-raise to prevent deletion from proceeding without redaction
         raise

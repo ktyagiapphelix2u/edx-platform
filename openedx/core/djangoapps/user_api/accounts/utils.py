@@ -198,37 +198,6 @@ def is_secondary_email_feature_enabled():
     return waffle.switch_is_active(ENABLE_SECONDARY_EMAIL_FEATURE_SWITCH)
 
 
-def redact_user_social_auth_pii(user_social_auth):
-    """
-    Redact PII from a UserSocialAuth record before deletion.
-
-    Downstream systems can retain deleted source rows as soft-deleted records, so sensitive
-    fields should be overwritten before deletion.
-
-    Uses a unique redacted UID per record (redacted_{pk}@retired.invalid) to avoid
-    IntegrityError from the unique_together constraint on (provider, uid).
-    """
-    if not user_social_auth or not user_social_auth.pk:
-        return
-
-    update_fields = {}
-
-    redacted_uid = f'redacted_{user_social_auth.pk}@retired.invalid'
-    if user_social_auth.uid != redacted_uid:
-        update_fields['uid'] = redacted_uid
-    if user_social_auth.extra_data:
-        update_fields['extra_data'] = {}
-
-    if not update_fields:
-        return
-
-    UserSocialAuth.objects.filter(pk=user_social_auth.pk).update(**update_fields)
-
-    # Keep instance in sync in case the caller reuses it.
-    for field_name, value in update_fields.items():
-        setattr(user_social_auth, field_name, value)
-
-
 def create_retirement_request_and_deactivate_account(user):
     """
     Adds user to retirement queue, unlinks social auth accounts, changes user passwords

@@ -11,7 +11,6 @@ from social_django.models import UserSocialAuth
 from common.djangoapps.student.models import CourseEnrollment
 from common.djangoapps.student.tests.factories import UserFactory
 from openedx.core.djangoapps.user_api.accounts.utils import (
-    redact_user_social_auth_pii,
     retrieve_last_sitewide_block_completed,
 )
 from openedx.core.djangolib.testing.utils import skip_unless_lms
@@ -166,35 +165,70 @@ class RedactUserSocialAuthPIITest(TestCase):
             extra_data=extra_data,
         )
 
-    def test_redact_user_social_auth_pii(self):
+    def test_delete_redacts_user_social_auth_pii(self):
         """
-        Test that redact_user_social_auth_pii correctly redacts uid and extra_data fields.
-        """
-        social_auth = self.create_social_auth()
-
-        redact_user_social_auth_pii(social_auth)
-        social_auth.refresh_from_db()
-
-        assert social_auth.uid == f'redacted_{social_auth.pk}@retired.invalid'
-        assert social_auth.extra_data == {}
-
-    def test_redact_user_social_auth_pii_idempotent(self):
-        """
-        Test that calling redact_user_social_auth_pii multiple times is idempotent.
+        Test that deleting social auth redacts uid and extra_data before removal.
         """
         social_auth = self.create_social_auth()
+        social_auth_id = social_auth.id
 
-        redact_user_social_auth_pii(social_auth)
-        # Duplicate call to redact user method to validate idempotency
-        redact_user_social_auth_pii(social_auth)
-        social_auth.refresh_from_db()
+        captured_states = []
 
-        assert social_auth.uid == f'redacted_{social_auth.pk}@retired.invalid'
-        assert social_auth.extra_data == {}
+        def capture_state_before_delete(sender, instance, **kwargs):  # pylint: disable=unused-argument
+            instance.refresh_from_db()
+            captured_states.append({
+                'id': instance.id,
+                'uid': instance.uid,
+                'extra_data': dict(instance.extra_data) if instance.extra_data else {},
+            })
 
-    def test_redact_multiple_sso_providers(self):
+        from django.db.models.signals import pre_delete
+
+        pre_delete.connect(capture_state_before_delete, sender=UserSocialAuth)
+        try:
+            social_auth.delete()
+        finally:
+            pre_delete.disconnect(capture_state_before_delete, sender=UserSocialAuth)
+
+        assert captured_states == [{
+            'id': social_auth_id,
+            'uid': f'redacted_{social_auth_id}@retired.invalid',
+            'extra_data': {},
+        }]
+        assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()
+
+    def test_delete_already_redacted_user_social_auth_is_idempotent(self):
         """
-        Test that redaction works correctly for multiple SSO providers.
+        Test that deleting an already redacted social auth keeps the redacted state.
+        """
+        social_auth = self.create_social_auth()
+        social_auth.uid = f'redacted_{social_auth.pk}@retired.invalid'
+        social_auth.extra_data = {}
+        social_auth.save(update_fields=['uid', 'extra_data'])
+        social_auth_id = social_auth.id
+
+        captured_states = []
+
+        def capture_state_before_delete(sender, instance, **kwargs):  # pylint: disable=unused-argument
+            instance.refresh_from_db()
+            captured_states.append((instance.uid, instance.extra_data))
+
+        from django.db.models.signals import pre_delete
+
+        pre_delete.connect(capture_state_before_delete, sender=UserSocialAuth)
+        try:
+            social_auth.delete()
+        finally:
+            pre_delete.disconnect(capture_state_before_delete, sender=UserSocialAuth)
+
+        assert captured_states == [
+            (f'redacted_{social_auth_id}@retired.invalid', {}),
+        ]
+        assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()
+
+    def test_delete_redacts_multiple_sso_providers(self):
+        """
+        Test that deletion redacts multiple SSO providers before removal.
         """
         auths = [
             self.create_social_auth(
@@ -208,8 +242,22 @@ class RedactUserSocialAuthPIITest(TestCase):
                 extra_data={'email': 'saml@example.com', 'name': 'SAML User', 'uid': 'saml-uid'}
             ),
         ]
-        for auth in auths:
-            redact_user_social_auth_pii(auth)
-            auth.refresh_from_db()
-            assert auth.uid == f'redacted_{auth.pk}@retired.invalid'
-            assert auth.extra_data == {}
+        captured_states = []
+
+        def capture_state_before_delete(sender, instance, **kwargs):  # pylint: disable=unused-argument
+            instance.refresh_from_db()
+            captured_states.append((instance.provider, instance.uid, instance.extra_data))
+
+        from django.db.models.signals import pre_delete
+
+        pre_delete.connect(capture_state_before_delete, sender=UserSocialAuth)
+        try:
+            for auth in auths:
+                auth.delete()
+        finally:
+            pre_delete.disconnect(capture_state_before_delete, sender=UserSocialAuth)
+
+        assert sorted(captured_states) == sorted([
+            ('google-oauth2', f'redacted_{auths[0].pk}@retired.invalid', {}),
+            ('tpa-saml', f'redacted_{auths[1].pk}@retired.invalid', {}),
+        ])
