@@ -915,13 +915,9 @@ class PendingEmailChange(DeletableByUserValue, models.Model):  # noqa: DJ008
     @classmethod
     def delete_by_user_value(cls, value, field):
         """
-        Deletes instances of this model where ``field`` equals ``value``.
+        Redacts new_email then deletes records where ``field`` equals ``value``.
 
-        Automatically redacts new_email before deletion to ensure PII is cleared.
-        Uses bulk ORM update for efficiency.
-
-        Returns True if any instances were deleted.
-        Returns False otherwise.
+        Returns True if deleted, False if no matching records found.
         """
         filter_kwargs = {field: value}
         records_matching_user_value = cls.objects.filter(**filter_kwargs)
