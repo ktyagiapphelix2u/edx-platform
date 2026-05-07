@@ -246,6 +246,8 @@ class RedactUserSocialAuthPIITest(TestCase):
                 extra_data={'email': 'saml@example.com', 'name': 'SAML User', 'uid': 'saml-uid'}
             ),
         ]
+        # Save IDs before deletion (they become None after delete)
+        auth_ids = [auth.pk for auth in auths]
 
         captured_states = []
 
