@@ -18,7 +18,7 @@ from openedx.core.djangoapps.user_api.accounts.tests.retirement_helpers import (
 )
 from openedx.core.djangolib.testing.utils import skip_unless_lms  # lint-amnesty, pylint: disable=wrong-import-order
 
-from ...accounts.signals import REDACTED_SOCIAL_AUTH_UID_PREFIX, REDACTED_SOCIAL_AUTH_UID_SUFFIX
+from ...accounts.signals import get_redacted_social_auth_uid
 from ...models import UserRetirementStatus
 
 pytestmark = pytest.mark.django_db
@@ -153,7 +153,7 @@ def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  
     # Verify that at the moment of deletion, the record was already redacted
     assert captured_states == [{
         'id': social_auth_id,
-        'uid': f'{REDACTED_SOCIAL_AUTH_UID_PREFIX}{social_auth_id}{REDACTED_SOCIAL_AUTH_UID_SUFFIX}',
+        'uid': get_redacted_social_auth_uid(social_auth_id),
         'extra_data': {},
     }], \
         "SSO records should be redacted before deletion"
@@ -203,6 +203,6 @@ def test_retire_user_redacts_each_social_auth_before_bulk_deletion(setup_retirem
         pre_delete.disconnect(capture_state_before_delete, sender=UserSocialAuth)
 
     assert sorted(captured_states) == sorted([
-        ('google-oauth2', f'{REDACTED_SOCIAL_AUTH_UID_PREFIX}{google_auth_id}{REDACTED_SOCIAL_AUTH_UID_SUFFIX}', {}),
-        ('tpa-saml', f'{REDACTED_SOCIAL_AUTH_UID_PREFIX}{saml_auth_id}{REDACTED_SOCIAL_AUTH_UID_SUFFIX}', {}),
+        ('google-oauth2', get_redacted_social_auth_uid(google_auth_id), {}),
+        ('tpa-saml', get_redacted_social_auth_uid(saml_auth_id), {}),
     ])

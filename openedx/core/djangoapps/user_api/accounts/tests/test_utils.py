@@ -10,10 +10,7 @@ from social_django.models import UserSocialAuth
 
 from common.djangoapps.student.models import CourseEnrollment
 from common.djangoapps.student.tests.factories import UserFactory
-from openedx.core.djangoapps.user_api.accounts.signals import (
-    REDACTED_SOCIAL_AUTH_UID_PREFIX,
-    REDACTED_SOCIAL_AUTH_UID_SUFFIX,
-)
+from openedx.core.djangoapps.user_api.accounts.signals import get_redacted_social_auth_uid
 from openedx.core.djangoapps.user_api.accounts.utils import (
     retrieve_last_sitewide_block_completed,
 )
@@ -169,6 +166,17 @@ class RedactUserSocialAuthPIITest(TestCase):
             extra_data=extra_data,
         )
 
+    def test_get_redacted_social_auth_uid_format(self):
+        """
+        Test that get_redacted_social_auth_uid returns the expected string format.
+
+        This is the single source of truth for the redacted uid format.
+        If this test breaks, the bulk retirement Concat/Cast in utils.py and
+        retire_user.py must also be updated to match.
+        """
+        assert get_redacted_social_auth_uid(42) == 'redacted-before-delete-42@safe.com'
+        assert get_redacted_social_auth_uid(1) == 'redacted-before-delete-1@safe.com'
+
     def test_delete_redacts_user_social_auth_pii(self):
         """
         Test that deleting social auth redacts uid and extra_data before removal.
@@ -196,7 +204,7 @@ class RedactUserSocialAuthPIITest(TestCase):
 
         assert captured_states == [{
             'id': social_auth_id,
-            'uid': f'{REDACTED_SOCIAL_AUTH_UID_PREFIX}{social_auth_id}{REDACTED_SOCIAL_AUTH_UID_SUFFIX}',
+            'uid': get_redacted_social_auth_uid(social_auth_id),
             'extra_data': {},
         }]
         assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()
@@ -206,7 +214,7 @@ class RedactUserSocialAuthPIITest(TestCase):
         Test that deleting an already redacted social auth keeps the redacted state.
         """
         social_auth = self.create_social_auth()
-        social_auth.uid = f'{REDACTED_SOCIAL_AUTH_UID_PREFIX}{social_auth.pk}{REDACTED_SOCIAL_AUTH_UID_SUFFIX}'
+        social_auth.uid = get_redacted_social_auth_uid(social_auth.pk)
         social_auth.extra_data = {}
         social_auth.save(update_fields=['uid', 'extra_data'])
         social_auth_id = social_auth.id
@@ -226,7 +234,7 @@ class RedactUserSocialAuthPIITest(TestCase):
             pre_delete.disconnect(capture_state_before_delete, sender=UserSocialAuth)
 
         assert captured_states == [
-            (f'{REDACTED_SOCIAL_AUTH_UID_PREFIX}{social_auth_id}{REDACTED_SOCIAL_AUTH_UID_SUFFIX}', {}),
+            (get_redacted_social_auth_uid(social_auth_id), {}),
         ]
         assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()
 
@@ -265,6 +273,6 @@ class RedactUserSocialAuthPIITest(TestCase):
             pre_delete.disconnect(capture_state_before_delete, sender=UserSocialAuth)
 
         assert sorted(captured_states) == sorted([
-            ('google-oauth2', f'{REDACTED_SOCIAL_AUTH_UID_PREFIX}{auth_ids[0]}{REDACTED_SOCIAL_AUTH_UID_SUFFIX}', {}),
-            ('tpa-saml', f'{REDACTED_SOCIAL_AUTH_UID_PREFIX}{auth_ids[1]}{REDACTED_SOCIAL_AUTH_UID_SUFFIX}', {}),
+            ('google-oauth2', get_redacted_social_auth_uid(auth_ids[0]), {}),
+            ('tpa-saml', get_redacted_social_auth_uid(auth_ids[1]), {}),
         ])

@@ -5,14 +5,12 @@ from django.contrib.auth import get_user_model  # lint-amnesty, pylint: disable=
 from django.contrib.auth.models import User  # lint-amnesty, pylint: disable=imported-auth-user
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from django.db.models import CharField, Value
-from django.db.models.functions import Cast, Concat
 from social_django.models import UserSocialAuth
 
 from common.djangoapps.student.models import AccountRecovery, Registration, get_retired_email_by_email
 from openedx.core.djangolib.oauth2_retirement_utils import retire_dot_oauth2_models
 
-from ...accounts.signals import REDACTED_SOCIAL_AUTH_UID_PREFIX, REDACTED_SOCIAL_AUTH_UID_SUFFIX
+from ...accounts.signals import get_redacted_social_auth_uid
 from ...models import BulkUserRetirementConfig, UserRetirementStatus
 
 logger = logging.getLogger(__name__)
@@ -147,17 +145,13 @@ class Command(BaseCommand):
                 for user in users:
                     # Add user to retirement queue.
                     UserRetirementStatus.create_retirement(user)
-                    # Redact and unlink LMS social auth accounts
-                    social_auth_queryset = UserSocialAuth.objects.filter(user_id=user.id)
-                    social_auth_queryset.update(
-                        uid=Concat(
-                            Value(REDACTED_SOCIAL_AUTH_UID_PREFIX),
-                            Cast('id', output_field=CharField()),
-                            Value(REDACTED_SOCIAL_AUTH_UID_SUFFIX),
-                        ),
-                        extra_data={},
-                    )
-                    social_auth_queryset.delete()
+                    # Redact and unlink LMS social auth accounts.
+                    social_auth_records = list(UserSocialAuth.objects.filter(user_id=user.id))
+                    for auth in social_auth_records:
+                        auth.uid = get_redacted_social_auth_uid(auth.pk)
+                        auth.extra_data = {}
+                    UserSocialAuth.objects.bulk_update(social_auth_records, ['uid', 'extra_data'])
+                    UserSocialAuth.objects.filter(user_id=user.id).delete()
                     # Change LMS password & email
                     user.email = get_retired_email_by_email(user.email)
                     user.set_unusable_password()
