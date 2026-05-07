@@ -11,6 +11,8 @@ import waffle  # lint-amnesty, pylint: disable=invalid-django-waffle-import
 from completion.models import BlockCompletion
 from completion.waffle import ENABLE_COMPLETION_TRACKING_SWITCH
 from django.conf import settings
+from django.db.models import CharField, Value
+from django.db.models.functions import Cast, Concat
 from django.utils.translation import gettext as _
 from edx_django_utils.user import generate_password
 from social_django.models import UserSocialAuth
@@ -22,7 +24,7 @@ from openedx.core.djangolib.oauth2_retirement_utils import retire_dot_oauth2_mod
 from xmodule.modulestore.django import modulestore  # lint-amnesty, pylint: disable=wrong-import-order
 
 from ..models import UserRetirementStatus
-from .signals import get_redacted_social_auth_uid
+from .signals import REDACTED_SOCIAL_AUTH_UID_PREFIX, REDACTED_SOCIAL_AUTH_UID_SUFFIX
 
 ENABLE_SECONDARY_EMAIL_FEATURE_SWITCH = 'enable_secondary_email_feature'
 LOGGER = logging.getLogger(__name__)
@@ -206,12 +208,16 @@ def create_retirement_request_and_deactivate_account(user):
     UserRetirementStatus.create_retirement(user)
 
     # Redact and unlink LMS social auth accounts.
-    social_auth_records = list(UserSocialAuth.objects.filter(user_id=user.id))
-    for auth in social_auth_records:
-        auth.uid = get_redacted_social_auth_uid(auth.pk)
-        auth.extra_data = {}
-    UserSocialAuth.objects.bulk_update(social_auth_records, ['uid', 'extra_data'])
-    UserSocialAuth.objects.filter(user_id=user.id).delete()
+    social_auth_queryset = UserSocialAuth.objects.filter(user_id=user.id)
+    social_auth_queryset.update(
+        uid=Concat(
+            Value(REDACTED_SOCIAL_AUTH_UID_PREFIX),
+            Cast('id', output_field=CharField()),
+            Value(REDACTED_SOCIAL_AUTH_UID_SUFFIX),
+        ),
+        extra_data={},
+    )
+    social_auth_queryset.delete()
 
     # Change LMS password & email
     user.email = get_retired_email_by_email(user.email)
