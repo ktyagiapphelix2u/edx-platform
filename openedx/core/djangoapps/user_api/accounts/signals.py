@@ -10,6 +10,11 @@ from social_django.models import UserSocialAuth
 
 logger = logging.getLogger(__name__)
 
+# Prefix and suffix used to build a per-record redacted uid for UserSocialAuth.
+# Both the signal handler and bulk retirement code use these to stay in sync.
+REDACTED_SOCIAL_AUTH_UID_PREFIX = 'redacted-before-delete-'
+REDACTED_SOCIAL_AUTH_UID_SUFFIX = '@safe.com'
+
 # Signal to retire a user from LMS-initiated mailings (course mailings, etc)
 # providing_args=["user"]
 USER_RETIRE_MAILINGS = Signal()
@@ -28,7 +33,8 @@ def redact_social_auth_pii_before_deletion(sender, instance, **kwargs):  # pylin
     """
     Redacts PII fields (uid, extra_data) before UserSocialAuth deletion.
 
-    Replaces uid with 'redacted_{pk}@retired.invalid' and clears extra_data.
+    Replaces uid with REDACTED_SOCIAL_AUTH_UID_PREFIX + pk + REDACTED_SOCIAL_AUTH_UID_SUFFIX
+    and clears extra_data.
     Blocks deletion if redaction fails to prevent PII leaks to downstream systems.
     """
     if not instance or not instance.pk:
@@ -36,8 +42,10 @@ def redact_social_auth_pii_before_deletion(sender, instance, **kwargs):  # pylin
 
     try:
         update_fields = {}
-        redacted_uid = f'redacted_{instance.pk}@retired.invalid'
+        redacted_uid = f'{REDACTED_SOCIAL_AUTH_UID_PREFIX}{instance.pk}{REDACTED_SOCIAL_AUTH_UID_SUFFIX}'
 
+        # These fields may have already been redacted as part of a bulk retirement,
+        # so we skip the update if it is already done to reduce query count.
         if instance.uid != redacted_uid:
             update_fields['uid'] = redacted_uid
         if instance.extra_data:

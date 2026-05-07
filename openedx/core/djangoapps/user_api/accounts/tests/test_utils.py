@@ -10,6 +10,10 @@ from social_django.models import UserSocialAuth
 
 from common.djangoapps.student.models import CourseEnrollment
 from common.djangoapps.student.tests.factories import UserFactory
+from openedx.core.djangoapps.user_api.accounts.signals import (
+    REDACTED_SOCIAL_AUTH_UID_PREFIX,
+    REDACTED_SOCIAL_AUTH_UID_SUFFIX,
+)
 from openedx.core.djangoapps.user_api.accounts.utils import (
     retrieve_last_sitewide_block_completed,
 )
@@ -192,7 +196,7 @@ class RedactUserSocialAuthPIITest(TestCase):
 
         assert captured_states == [{
             'id': social_auth_id,
-            'uid': f'redacted_{social_auth_id}@retired.invalid',
+            'uid': f'{REDACTED_SOCIAL_AUTH_UID_PREFIX}{social_auth_id}{REDACTED_SOCIAL_AUTH_UID_SUFFIX}',
             'extra_data': {},
         }]
         assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()
@@ -202,7 +206,7 @@ class RedactUserSocialAuthPIITest(TestCase):
         Test that deleting an already redacted social auth keeps the redacted state.
         """
         social_auth = self.create_social_auth()
-        social_auth.uid = f'redacted_{social_auth.pk}@retired.invalid'
+        social_auth.uid = f'{REDACTED_SOCIAL_AUTH_UID_PREFIX}{social_auth.pk}{REDACTED_SOCIAL_AUTH_UID_SUFFIX}'
         social_auth.extra_data = {}
         social_auth.save(update_fields=['uid', 'extra_data'])
         social_auth_id = social_auth.id
@@ -222,7 +226,7 @@ class RedactUserSocialAuthPIITest(TestCase):
             pre_delete.disconnect(capture_state_before_delete, sender=UserSocialAuth)
 
         assert captured_states == [
-            (f'redacted_{social_auth_id}@retired.invalid', {}),
+            (f'{REDACTED_SOCIAL_AUTH_UID_PREFIX}{social_auth_id}{REDACTED_SOCIAL_AUTH_UID_SUFFIX}', {}),
         ]
         assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()
 
@@ -242,8 +246,7 @@ class RedactUserSocialAuthPIITest(TestCase):
                 extra_data={'email': 'saml@example.com', 'name': 'SAML User', 'uid': 'saml-uid'}
             ),
         ]
-        # Save IDs before deletion (they become None after delete)
-        auth_ids = [auth.pk for auth in auths]
+
         captured_states = []
 
         def capture_state_before_delete(sender, instance, **kwargs):  # pylint: disable=unused-argument
@@ -260,6 +263,6 @@ class RedactUserSocialAuthPIITest(TestCase):
             pre_delete.disconnect(capture_state_before_delete, sender=UserSocialAuth)
 
         assert sorted(captured_states) == sorted([
-            ('google-oauth2', f'redacted_{auth_ids[0]}@retired.invalid', {}),
-            ('tpa-saml', f'redacted_{auth_ids[1]}@retired.invalid', {}),
+            ('google-oauth2', f'{REDACTED_SOCIAL_AUTH_UID_PREFIX}{auth_ids[0]}{REDACTED_SOCIAL_AUTH_UID_SUFFIX}', {}),
+            ('tpa-saml', f'{REDACTED_SOCIAL_AUTH_UID_PREFIX}{auth_ids[1]}{REDACTED_SOCIAL_AUTH_UID_SUFFIX}', {}),
         ])

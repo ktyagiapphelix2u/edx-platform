@@ -24,6 +24,7 @@ from openedx.core.djangolib.oauth2_retirement_utils import retire_dot_oauth2_mod
 from xmodule.modulestore.django import modulestore  # lint-amnesty, pylint: disable=wrong-import-order
 
 from ..models import UserRetirementStatus
+from .signals import REDACTED_SOCIAL_AUTH_UID_PREFIX, REDACTED_SOCIAL_AUTH_UID_SUFFIX
 
 ENABLE_SECONDARY_EMAIL_FEATURE_SWITCH = 'enable_secondary_email_feature'
 LOGGER = logging.getLogger(__name__)
@@ -210,9 +211,9 @@ def create_retirement_request_and_deactivate_account(user):
     social_auth_queryset = UserSocialAuth.objects.filter(user_id=user.id)
     social_auth_queryset.update(
         uid=Concat(
-            Value('redacted_'),
+            Value(REDACTED_SOCIAL_AUTH_UID_PREFIX),
             Cast('id', output_field=CharField()),
-            Value('@retired.invalid'),
+            Value(REDACTED_SOCIAL_AUTH_UID_SUFFIX),
         ),
         extra_data={},
     )
