@@ -47,7 +47,7 @@ def redact_social_auth_pii_before_deletion(sender, instance, **kwargs):  # pylin
     # Safety-net in case the record wasn't redacted before delete.
     if instance.extra_data or instance.uid != redacted_uid:
         logger.warning(
-            'Social auth link for user_id=%s, provider=%s was deleted without first being redacted.',
+            'Social auth link for user_id=%s, provider=%s was deleted without first being redacted. Redacting in pre_delete.',
             instance.user_id,
             instance.provider,
         )
