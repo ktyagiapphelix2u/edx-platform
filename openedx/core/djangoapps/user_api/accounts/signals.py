@@ -8,7 +8,7 @@ from django.db.models.signals import pre_delete
 from django.dispatch import Signal, receiver
 from social_django.models import UserSocialAuth
 
-from .utils import REDACTED_SOCIAL_AUTH_UID_PREFIX, REDACTED_SOCIAL_AUTH_UID_SUFFIX
+from .utils import REDACTED_SOCIAL_AUTH_UID_PREFIX, REDACTED_SOCIAL_AUTH_UID_SUFFIX, redact_and_delete_social_auth
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +42,6 @@ def redact_social_auth_pii_before_deletion(sender, instance, **kwargs):  # pylin
     Records deleted via ``redact_and_delete_social_auth`` will already be redacted;
     this handler is a fallback for any other deletion path.
     """
-    from .utils import redact_and_delete_social_auth  # local import to avoid circular dependency
-
     redacted_uid = get_redacted_social_auth_uid(instance.pk)
 
     # Safety-net in case the record wasn't redacted before delete.
