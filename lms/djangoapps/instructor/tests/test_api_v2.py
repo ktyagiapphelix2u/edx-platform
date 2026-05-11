@@ -3,7 +3,7 @@ Unit tests for instructor API v2 endpoints.
 """
 import json
 from datetime import datetime, timedelta
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 from urllib.parse import urlencode
 from uuid import uuid4
 
@@ -12,6 +12,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.http import Http404
 from django.test import SimpleTestCase, override_settings
+from django.test.client import Client as DjangoClient
 from django.urls import NoReverseMatch, reverse
 from edx_when.api import set_date_for_block, set_dates_for_course
 from opaque_keys import InvalidKeyError
@@ -36,9 +37,10 @@ from common.djangoapps.student.tests.factories import (
     UserFactory,
 )
 from lms.djangoapps.certificates.data import CertificateStatuses
-from lms.djangoapps.certificates.models import CertificateGenerationHistory
+from lms.djangoapps.certificates.models import CertificateAllowlist, CertificateGenerationHistory
 from lms.djangoapps.certificates.tests.factories import GeneratedCertificateFactory
 from lms.djangoapps.courseware.models import StudentModule
+from lms.djangoapps.courseware.tests.helpers import MasqueradeMixin
 from lms.djangoapps.instructor.access import ROLE_DISPLAY_NAMES
 from lms.djangoapps.instructor.permissions import InstructorPermission
 from lms.djangoapps.instructor.views.serializers_v2 import CourseInformationSerializerV2
@@ -50,7 +52,7 @@ from xmodule.modulestore.tests.factories import BlockFactory, CourseFactory
 
 
 @ddt.ddt
-class CourseMetadataViewTest(SharedModuleStoreTestCase):
+class CourseMetadataViewTest(SharedModuleStoreTestCase, MasqueradeMixin):
     """
     Tests for the CourseMetadataView API endpoint.
     """
@@ -81,6 +83,7 @@ class CourseMetadataViewTest(SharedModuleStoreTestCase):
         self.admin = AdminFactory.create()
         self.instructor = InstructorFactory.create(course_key=self.course_key)
         self.staff = StaffFactory.create(course_key=self.course_key)
+        self.django_staff_user = UserFactory.create(is_staff=True)
         self.data_researcher = UserFactory.create()
         CourseDataResearcherRole(self.course_key).add_users(self.data_researcher)
         CourseInstructorRole(self.proctored_course.id).add_users(self.instructor)
@@ -118,60 +121,106 @@ class CourseMetadataViewTest(SharedModuleStoreTestCase):
             course_id = str(self.course_key)
         return reverse('instructor_api_v2:course_metadata', kwargs={'course_id': course_id})
 
+    @override_settings(
+        COURSE_AUTHORING_MICROFRONTEND_URL='http://localhost:2001/authoring',
+        ADMIN_CONSOLE_MICROFRONTEND_URL='http://localhost:2025/admin-console',
+        # intentionally include trailing slash to test URL joining logic
+        WRITABLE_GRADEBOOK_URL='http://localhost:1994/gradebook/',
+    )
     def test_get_course_metadata_as_instructor(self):
         """
         Test that an instructor can retrieve comprehensive course metadata.
         """
-        self.client.force_authenticate(user=self.instructor)
-        response = self.client.get(self._get_url())
+        with patch(
+            'lms.djangoapps.instructor.views.serializers_v2.is_writable_gradebook_enabled',
+            return_value=True,
+        ):
+            self.client.force_authenticate(user=self.instructor)
+            response = self.client.get(self._get_url())
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)  # noqa: PT009
+        assert response.status_code == status.HTTP_200_OK
         data = response.data
 
         # Verify basic course information
-        self.assertEqual(data['course_id'], str(self.course_key))  # noqa: PT009
-        self.assertEqual(data['display_name'], 'Demonstration Course')  # noqa: PT009
-        self.assertEqual(data['org'], 'edX')  # noqa: PT009
-        self.assertEqual(data['course_number'], 'DemoX')  # noqa: PT009
-        self.assertEqual(data['course_run'], 'Demo_Course')  # noqa: PT009
-        self.assertEqual(data['pacing'], 'instructor')  # noqa: PT009
+        assert data['course_id'] == str(self.course_key)
+        assert data['display_name'] == 'Demonstration Course'
+        assert data['org'] == 'edX'
+        assert data['course_number'] == 'DemoX'
+        assert data['course_run'] == 'Demo_Course'
+        assert data['pacing'] == 'instructor'
 
         # Verify enrollment counts structure
-        self.assertIn('enrollment_counts', data)  # noqa: PT009
-        self.assertIn('total', data['enrollment_counts'])  # noqa: PT009
-        self.assertIn('total_enrollment', data)  # noqa: PT009
-        self.assertGreaterEqual(data['total_enrollment'], 3)  # noqa: PT009
+        assert 'enrollment_counts' in data
+        assert 'total' in data['enrollment_counts']
+        assert 'total_enrollment' in data
+        assert data['total_enrollment'] >= 3
 
         # Verify role-based enrollment counts are present
-        self.assertIn('learner_count', data)  # noqa: PT009
-        self.assertIn('staff_count', data)  # noqa: PT009
-        self.assertEqual(data['total_enrollment'], data['learner_count'] + data['staff_count'])  # noqa: PT009
+        assert 'learner_count' in data
+        assert 'staff_count' in data
+        assert data['total_enrollment'] == data['learner_count'] + data['staff_count']
 
         # Verify permissions structure
-        self.assertIn('permissions', data)  # noqa: PT009
+        assert 'permissions' in data
         permissions_data = data['permissions']
-        self.assertIn('admin', permissions_data)  # noqa: PT009
-        self.assertIn('instructor', permissions_data)  # noqa: PT009
-        self.assertIn('staff', permissions_data)  # noqa: PT009
-        self.assertIn('forum_admin', permissions_data)  # noqa: PT009
-        self.assertIn('finance_admin', permissions_data)  # noqa: PT009
-        self.assertIn('sales_admin', permissions_data)  # noqa: PT009
-        self.assertIn('data_researcher', permissions_data)  # noqa: PT009
+        assert 'admin' in permissions_data
+        assert 'instructor' in permissions_data
+        assert 'staff' in permissions_data
+        assert 'forum_admin' in permissions_data
+        assert 'finance_admin' in permissions_data
+        assert 'sales_admin' in permissions_data
+        assert 'data_researcher' in permissions_data
 
         # Verify sections structure
-        self.assertIn('tabs', data)  # noqa: PT009
-        self.assertIsInstance(data['tabs'], list)  # noqa: PT009
+        assert 'tabs' in data
+        assert isinstance(data['tabs'], list)
 
         # Verify other metadata fields
-        self.assertIn('num_sections', data)  # noqa: PT009
-        self.assertIn('tabs', data)  # noqa: PT009
-        self.assertIn('grade_cutoffs', data)  # noqa: PT009
-        self.assertIn('course_errors', data)  # noqa: PT009
-        self.assertIn('studio_url', data)  # noqa: PT009
-        self.assertIn('disable_buttons', data)  # noqa: PT009
-        self.assertIn('has_started', data)  # noqa: PT009
-        self.assertIn('has_ended', data)  # noqa: PT009
-        self.assertIn('analytics_dashboard_message', data)  # noqa: PT009
+        assert 'num_sections' in data
+        assert 'grade_cutoffs' in data
+        assert 'course_errors' in data
+        assert 'studio_url' in data
+        assert 'disable_buttons' in data
+        assert 'has_started' in data
+        assert 'has_ended' in data
+        assert 'analytics_dashboard_message' in data
+        assert 'studio_grading_url' in data
+        assert 'admin_console_url' in data
+        assert 'gradebook_url' in data
+
+        # Verify current user's username is returned
+        assert data['username'] == self.instructor.username
+
+        assert data['studio_grading_url'] == f'http://localhost:2001/authoring/course/{self.course.id}/settings/grading'
+        assert data['admin_console_url'] == 'http://localhost:2025/admin-console/authz'
+        assert data['gradebook_url'] == f'http://localhost:1994/gradebook/{self.course.id}'
+
+    @override_settings(ADMIN_CONSOLE_MICROFRONTEND_URL='http://localhost:2025/admin-console')
+    def test_admin_console_url_requires_instructor_access(self):
+        """
+        Test that the admin console URL is only available to users with instructor access.
+        """
+        # data researcher has access to course but is not an instructor
+        self.client.force_authenticate(user=self.data_researcher)
+        response = self.client.get(self._get_url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert 'admin_console_url' in response.data
+        data = response.data
+        assert data['admin_console_url'] is None
+
+    @override_settings(ADMIN_CONSOLE_MICROFRONTEND_URL='http://localhost:2025/admin-console')
+    def test_django_staff_user_without_instructor_access_can_see_admin_console_url(self):
+        """
+        Test that Django staff users without instructor access can see the admin console URL.
+        """
+        self.client.force_authenticate(user=self.django_staff_user)
+        response = self.client.get(self._get_url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert 'admin_console_url' in response.data
+        data = response.data
+        assert data['admin_console_url'] == 'http://localhost:2025/admin-console/authz'
 
     def test_get_course_metadata_as_staff(self):
         """
@@ -180,12 +229,13 @@ class CourseMetadataViewTest(SharedModuleStoreTestCase):
         self.client.force_authenticate(user=self.staff)
         response = self.client.get(self._get_url())
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)  # noqa: PT009
+        assert response.status_code == status.HTTP_200_OK
         data = response.data
-        self.assertEqual(data['course_id'], str(self.course_key))  # noqa: PT009
-        self.assertIn('permissions', data)  # noqa: PT009
+        assert data['course_id'] == str(self.course_key)
+        assert 'permissions' in data
         # Staff should have staff permission
-        self.assertTrue(data['permissions']['staff'])  # noqa: PT009
+        assert data['permissions']['staff'] is True
+        assert data['username'] == self.staff.username
 
     def test_get_course_metadata_unauthorized(self):
         """
@@ -327,9 +377,9 @@ class CourseMetadataViewTest(SharedModuleStoreTestCase):
         """Helper to test tabs visible to staff users."""
         tab_ids = [tab['tab_id'] for tab in tabs]
 
-        # Staff should see these basic tabs
-        expected_basic_tabs = ['course_info', 'enrollments', 'course_team', 'grading', 'cohorts']
-        self.assertListEqual(tab_ids, expected_basic_tabs)  # noqa: PT009
+        # Staff should see these basic tabs (course_team is restricted to instructor/forum_admin)
+        expected_basic_tabs = ['course_info', 'enrollments', 'grading', 'cohorts']
+        assert tab_ids == expected_basic_tabs
 
     def test_staff_sees_basic_tabs(self):
         """
@@ -343,7 +393,10 @@ class CourseMetadataViewTest(SharedModuleStoreTestCase):
         Test that instructors see all tabs that staff see.
         """
         instructor_tabs = self._get_tabs_from_response(self.instructor)
-        self._test_staff_tabs(instructor_tabs)
+        tab_ids = [tab['tab_id'] for tab in instructor_tabs]
+
+        expected_tabs = ['course_info', 'enrollments', 'course_team', 'grading', 'cohorts']
+        assert tab_ids == expected_tabs
 
     def test_researcher_sees_all_basic_tabs(self):
         """
@@ -587,6 +640,31 @@ class CourseMetadataViewTest(SharedModuleStoreTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)  # noqa: PT009
         self.assertEqual(response.data['pacing'], 'self')  # noqa: PT009
+
+    def test_masquerade_as_student_role_returns_403(self):
+        """
+        Test that the endpoint returns 403 when a staff user masquerades as a student role.
+        """
+        # Use Django's test Client for masquerade (MasqueradeMixin is incompatible with DRF APIClient)
+        original_client = self.client
+        self.client = DjangoClient()
+        self.client.login(username=self.staff.username, password='Password1234')
+        self.update_masquerade(course=self.course, role='student')
+        response = self.client.get(self._get_url())
+        self.client = original_client
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_masquerade_as_specific_student_returns_403(self):
+        """
+        Test that the endpoint returns 403 when a staff user masquerades as a specific student.
+        """
+        original_client = self.client
+        self.client = DjangoClient()
+        self.client.login(username=self.staff.username, password='Password1234')
+        self.update_masquerade(course=self.course, username=self.student.username)
+        response = self.client.get(self._get_url())
+        self.client = original_client
+        assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 class BuildTabUrlTest(SimpleTestCase):
@@ -2091,6 +2169,186 @@ class IssuedCertificatesViewTest(SharedModuleStoreTestCase):
         assert 'previous' in response.data
         assert 'results' in response.data
 
+    def test_granted_exceptions_without_certificates(self):
+        """
+        Test that granted_exceptions filter shows allowlisted users
+        even if they don't have GeneratedCertificate records yet.
+        """
+        # Add student1 to allowlist (has verified enrollment)
+        CertificateAllowlist.objects.create(
+            user=self.student1,
+            course_id=self.course_key,
+            allowlist=True,
+            notes='Medical emergency'
+        )
+
+        # Add student2 to allowlist (has audit enrollment, no certificate)
+        CertificateAllowlist.objects.create(
+            user=self.student2,
+            course_id=self.course_key,
+            allowlist=True,
+            notes='Special case'
+        )
+
+        # Create certificate only for student1
+        GeneratedCertificateFactory.create(
+            user=self.student1,
+            course_id=self.course_key,
+            status=CertificateStatuses.downloadable
+        )
+
+        self.client.force_authenticate(user=self.instructor)
+        params = {'filter': 'granted_exceptions'}
+        response = self.client.get(self._get_url(), params)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['count'] == 2  # Both students should appear
+
+        results = {r['username']: r for r in response.data['results']}
+
+        # Verify student1 (has certificate)
+        assert 'student1' in results
+        assert results['student1']['enrollment_track'] == 'verified'
+        assert results['student1']['certificate_status'] == 'downloadable'
+        assert results['student1']['special_case'] == 'Exception'
+        assert results['student1']['exception_notes'] == 'Medical emergency'
+
+        # Verify student2 (no certificate, but should appear with enrollment data)
+        assert 'student2' in results
+        assert results['student2']['enrollment_track'] == 'audit'
+        assert results['student2']['certificate_status'] == 'audit_notpassing'
+        assert results['student2']['special_case'] == 'Exception'
+        assert results['student2']['exception_notes'] == 'Special case'
+
+
+class RegenerateCertificatesViewTest(SharedModuleStoreTestCase):
+    """
+    Tests for the RegenerateCertificatesView API endpoint.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.course = CourseFactory.create(
+            org='edX',
+            number='TestX',
+            run='Test_Course',
+            display_name='Test Course',
+        )
+        cls.course_key = cls.course.id
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self.instructor = InstructorFactory.create(course_key=self.course_key)
+        self.student = UserFactory.create(username='student1', email='student1@example.com')
+
+        # Enroll student
+        CourseEnrollmentFactory.create(
+            user=self.student,
+            course_id=self.course_key,
+            mode='verified',
+            is_active=True
+        )
+
+    def _get_url(self, course_id=None):
+        """Helper to get the API URL."""
+        if course_id is None:
+            course_id = str(self.course_key)
+        return reverse('instructor_api_v2:regenerate_certificates', kwargs={'course_id': course_id})
+
+    @patch('lms.djangoapps.instructor.views.api_v2.task_api.generate_certificates_for_students')
+    def test_allowlisted_not_generated_passes_correct_student_set(self, mock_generate_certs):
+        """
+        Test that student_set='allowlisted_not_generated' is passed correctly to the task layer.
+
+        This test prevents future drift between the API layer and task layer if either
+        is renamed independently.
+        """
+        # Mock the task API to return a fake InstructorTask
+        mock_task = MagicMock()
+        mock_task.task_id = 'test-task-id-123'
+        mock_generate_certs.return_value = mock_task
+
+        # Authenticate and make the request
+        self.client.force_authenticate(user=self.instructor)
+        response = self.client.post(
+            self._get_url(),
+            data={'student_set': 'allowlisted_not_generated'},
+            format='json'
+        )
+
+        # Assert the response is successful
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['task_id'] == 'test-task-id-123'
+
+        # Assert the task API was called with the correct parameters
+        # Expected call signature: generate_certificates_for_students(request, course_key, student_set=...)
+        mock_generate_certs.assert_called_once()
+        call_args = mock_generate_certs.call_args
+        _, course_key_arg = call_args.args[:2]  # Unpack request and course_key positional args
+        assert course_key_arg == self.course_key
+        assert call_args.kwargs['student_set'] == 'allowlisted_not_generated'
+
+    @patch('lms.djangoapps.instructor.views.api_v2.task_api.generate_certificates_for_students')
+    def test_allowlisted_translates_to_all_allowlisted(self, mock_generate_certs):
+        """
+        Test that student_set='allowlisted' is translated to 'all_allowlisted' for the task layer.
+
+        This preserves the legacy translation from the pre-allowlist "whitelist" naming era.
+        """
+        # Mock the task API to return a fake InstructorTask
+        mock_task = MagicMock()
+        mock_task.task_id = 'test-task-id-456'
+        mock_generate_certs.return_value = mock_task
+
+        # Authenticate and make the request
+        self.client.force_authenticate(user=self.instructor)
+        response = self.client.post(
+            self._get_url(),
+            data={'student_set': 'allowlisted'},
+            format='json'
+        )
+
+        # Assert the response is successful
+        assert response.status_code == status.HTTP_200_OK
+
+        # Assert the task API was called with the translated value
+        mock_generate_certs.assert_called_once()
+        call_kwargs = mock_generate_certs.call_args.kwargs
+        assert call_kwargs['student_set'] == 'all_allowlisted'
+
+    @patch('lms.djangoapps.instructor.views.api_v2.task_api.generate_certificates_for_students')
+    def test_all_students_omits_student_set_kwarg(self, mock_generate_certs):
+        """
+        Test that student_set='all' calls the task layer without a student_set kwarg.
+
+        This ensures the default behavior (generate for all enrolled students) is preserved.
+        """
+        # Mock the task API to return a fake InstructorTask
+        mock_task = MagicMock()
+        mock_task.task_id = 'test-task-id-789'
+        mock_generate_certs.return_value = mock_task
+
+        # Authenticate and make the request with student_set='all'
+        self.client.force_authenticate(user=self.instructor)
+        response = self.client.post(
+            self._get_url(),
+            data={'student_set': 'all'},
+            format='json'
+        )
+
+        # Assert the response is successful
+        assert response.status_code == status.HTTP_200_OK
+
+        # Assert the task API was called without student_set kwarg
+        # Expected call signature: generate_certificates_for_students(request, course_key)
+        mock_generate_certs.assert_called_once()
+        call_args = mock_generate_certs.call_args
+        _, course_key_arg = call_args.args[:2]  # Unpack request and course_key positional args
+        assert course_key_arg == self.course_key
+        assert 'student_set' not in call_args.kwargs
+
 
 @ddt.ddt
 class CertificateGenerationHistoryViewTest(SharedModuleStoreTestCase):
@@ -2203,7 +2461,7 @@ class CertificateGenerationHistoryViewTest(SharedModuleStoreTestCase):
         # Verify all required fields are present (snake_case from serializer)
         assert entry['task_name'] == 'Regenerated'
         assert 'date' in entry
-        assert entry['details'] == 'All learners'
+        assert entry['details'] == 'All Learners'
 
         # Verify data types
         assert isinstance(entry['task_name'], str)
@@ -2797,6 +3055,29 @@ class CourseTeamRolesViewTest(SharedModuleStoreTestCase):
         ccx_entry = next(r for r in response.data['results'] if r['role'] == 'ccx_coach')
         assert ccx_entry['display_name'] == 'CCX Coach'
 
+    @override_settings(FEATURES={**settings.FEATURES, 'CUSTOM_COURSES_EDX': True})
+    def test_roles_sort_order(self):
+        """Roles are returned in the expected display order, with ccx_coach last."""
+        ccx_course = CourseFactory.create(
+            org='edX',
+            number='SortX',
+            run='2024',
+            display_name='Sort Order Test Course',
+            enable_ccx=True,
+        )
+        url = reverse('instructor_api_v2:course_team_roles', kwargs={'course_id': str(ccx_course.id)})
+        instructor = InstructorFactory.create(course_key=ccx_course.id)
+        self.client.force_authenticate(user=instructor)
+        response = self.client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        returned_roles = [r['role'] for r in response.data['results']]
+        assert returned_roles == [
+            'staff', 'limited_staff', 'instructor', 'beta', 'data_researcher',
+            'Administrator', 'Moderator', 'Group Moderator', 'Community TA',
+            'ccx_coach',
+        ]
+
     def test_list_roles_unauthenticated(self):
         """Unauthenticated request returns 401."""
         response = self.client.get(self.url)
@@ -3369,3 +3650,235 @@ class CourseTeamMemberViewTest(SharedModuleStoreTestCase):
         assert response.data['roles'] == ['Moderator']
         assert response.data['action'] == 'revoke'
         assert not role.users.filter(pk=target.pk).exists()
+
+
+class CourseTeamTabVisibilityTest(SharedModuleStoreTestCase):
+    """
+    Tests that the course_team tab is only visible to Admin (instructor role)
+    and Discussion Admin (forum Administrator role).
+
+    See: https://github.com/openedx/openedx-platform/issues/38439
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.course = CourseFactory.create(
+            org='edX',
+            number='TabVis',
+            run='2024',
+            display_name='Tab Visibility Test Course',
+        )
+        cls.course_key = cls.course.id
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        self.url = reverse('instructor_api_v2:course_metadata', kwargs={'course_id': str(self.course_key)})
+
+        # Instructor (Admin) — should see course_team tab
+        self.instructor = InstructorFactory.create(course_key=self.course_key)
+
+        # Discussion Admin (forum Administrator) — should see course_team tab
+        self.forum_admin = StaffFactory.create(course_key=self.course_key)
+        seed_permissions_roles(self.course_key)
+        admin_role = Role.objects.get(course_id=self.course_key, name='Administrator')
+        admin_role.users.add(self.forum_admin)
+
+        # Staff — should NOT see course_team tab
+        self.staff_user = StaffFactory.create(course_key=self.course_key)
+
+    def _get_tab_ids(self, user):
+        self.client.force_authenticate(user=user)
+        response = self.client.get(self.url)
+        assert response.status_code == status.HTTP_200_OK
+        return [tab['tab_id'] for tab in response.data.get('tabs', [])]
+
+    def test_instructor_sees_course_team_tab(self):
+        """Admin (instructor role) should see the course_team tab."""
+        tab_ids = self._get_tab_ids(self.instructor)
+        assert 'course_team' in tab_ids
+
+    def test_forum_admin_sees_course_team_tab(self):
+        """Discussion Admin (forum Administrator role) should see the course_team tab."""
+        tab_ids = self._get_tab_ids(self.forum_admin)
+        assert 'course_team' in tab_ids
+
+    def test_staff_does_not_see_course_team_tab(self):
+        """Staff without instructor or forum admin role should NOT see the course_team tab."""
+        tab_ids = self._get_tab_ids(self.staff_user)
+        assert 'course_team' not in tab_ids
+
+
+class CourseTeamEndpointForumAdminAccessTest(SharedModuleStoreTestCase):
+    """
+    Tests that Discussion Admin (forum Administrator role) can access
+    course team endpoints, not just the instructor role.
+
+    See: https://github.com/openedx/openedx-platform/issues/38439
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.course = CourseFactory.create(
+            org='edX',
+            number='ForumAccess',
+            run='2024',
+            display_name='Forum Admin Access Test Course',
+        )
+        cls.course_key = cls.course.id
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+
+        # Discussion Admin: staff + forum Administrator role
+        self.forum_admin = StaffFactory.create(course_key=self.course_key)
+        seed_permissions_roles(self.course_key)
+        admin_role = Role.objects.get(course_id=self.course_key, name='Administrator')
+        admin_role.users.add(self.forum_admin)
+
+        # Plain staff user (no forum admin, no instructor) — should be denied
+        self.staff_user = StaffFactory.create(course_key=self.course_key)
+
+    def test_forum_admin_can_list_team_roles(self):
+        """Discussion Admin should be able to GET /team/roles."""
+        url = reverse('instructor_api_v2:course_team_roles', kwargs={'course_id': str(self.course_key)})
+        self.client.force_authenticate(user=self.forum_admin)
+        response = self.client.get(url)
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_forum_admin_can_list_team_members(self):
+        """Discussion Admin should be able to GET /team."""
+        url = reverse('instructor_api_v2:course_team', kwargs={'course_id': str(self.course_key)})
+        self.client.force_authenticate(user=self.forum_admin)
+        response = self.client.get(url)
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_forum_admin_can_grant_forum_role(self):
+        """Discussion Admin should be able to grant a forum role."""
+        url = reverse('instructor_api_v2:course_team', kwargs={'course_id': str(self.course_key)})
+        target = UserFactory.create()
+        self.client.force_authenticate(user=self.forum_admin)
+        response = self.client.post(url, {
+            'identifiers': [target.username],
+            'role': 'Moderator',
+            'action': 'allow',
+        }, format='json')
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_forum_admin_can_revoke_forum_role(self):
+        """Discussion Admin should be able to revoke a forum role."""
+        target = UserFactory.create()
+        role = Role.objects.get(course_id=self.course_key, name='Moderator')
+        role.users.add(target)
+        url = reverse(
+            'instructor_api_v2:course_team_member',
+            kwargs={'course_id': str(self.course_key), 'email_or_username': target.username},
+        )
+        self.client.force_authenticate(user=self.forum_admin)
+        response = self.client.delete(url, {'roles': ['Moderator']}, format='json')
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_forum_admin_cannot_grant_course_role(self):
+        """Discussion Admin should not be able to grant a non-forum course role like staff."""
+        url = reverse('instructor_api_v2:course_team', kwargs={'course_id': str(self.course_key)})
+        target = UserFactory.create()
+        self.client.force_authenticate(user=self.forum_admin)
+        response = self.client.post(url, {
+            'identifiers': [target.username],
+            'role': 'staff',
+            'action': 'allow',
+        }, format='json')
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert 'You do not have permissions to change this role' in response.data['error']
+
+    def test_forum_admin_cannot_revoke_course_role(self):
+        """Discussion Admin should not be able to revoke a non-forum course role like staff."""
+        target = StaffFactory.create(course_key=self.course_key)
+        url = reverse(
+            'instructor_api_v2:course_team_member',
+            kwargs={'course_id': str(self.course_key), 'email_or_username': target.username},
+        )
+        self.client.force_authenticate(user=self.forum_admin)
+        response = self.client.delete(url, {'roles': ['staff']}, format='json')
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert 'You do not have permissions to change the requested roles' in response.data['error']
+
+    def test_plain_staff_cannot_access_team_endpoints(self):
+        """Staff without instructor or forum admin role should get 403."""
+        url = reverse('instructor_api_v2:course_team', kwargs={'course_id': str(self.course_key)})
+        self.client.force_authenticate(user=self.staff_user)
+        response = self.client.get(url)
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_non_staff_forum_admin_cannot_access_team_endpoints(self):
+        """Non-staff user with only forum Administrator role should get 403."""
+        non_staff_forum_admin = UserFactory.create()
+        admin_role = Role.objects.get(course_id=self.course_key, name='Administrator')
+        admin_role.users.add(non_staff_forum_admin)
+
+        url = reverse('instructor_api_v2:course_team', kwargs={'course_id': str(self.course_key)})
+        self.client.force_authenticate(user=non_staff_forum_admin)
+        response = self.client.get(url)
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_forum_admin_cannot_grant_instructor_role(self):
+        """Discussion Admin should not be able to grant the instructor role (privilege escalation)."""
+        url = reverse('instructor_api_v2:course_team', kwargs={'course_id': str(self.course_key)})
+        target = UserFactory.create()
+        self.client.force_authenticate(user=self.forum_admin)
+        response = self.client.post(url, {
+            'identifiers': [target.username],
+            'role': 'instructor',
+            'action': 'allow',
+        }, format='json')
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert 'You do not have permissions to change this role' in response.data['error']
+
+    def test_forum_admin_cannot_revoke_instructor_role(self):
+        """Discussion Admin should not be able to revoke the instructor role."""
+        instructor = InstructorFactory.create(course_key=self.course_key)
+        url = reverse(
+            'instructor_api_v2:course_team_member',
+            kwargs={'course_id': str(self.course_key), 'email_or_username': instructor.username},
+        )
+        self.client.force_authenticate(user=self.forum_admin)
+        response = self.client.delete(url, {'roles': ['instructor']}, format='json')
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert 'You do not have permissions to change the requested roles' in response.data['error']
+
+    def test_roles_editable_param_filters_for_forum_admin(self):
+        """GET /team/roles?editable=true returns only forum roles for Discussion Admin."""
+        url = reverse('instructor_api_v2:course_team_roles', kwargs={'course_id': str(self.course_key)})
+        self.client.force_authenticate(user=self.forum_admin)
+        response = self.client.get(url, {'editable': 'true'})
+        assert response.status_code == status.HTTP_200_OK
+        returned_roles = {r['role'] for r in response.data['results']}
+        assert returned_roles == {'Administrator', 'Moderator', 'Group Moderator', 'Community TA'}
+
+    def test_roles_editable_param_returns_all_for_instructor(self):
+        """GET /team/roles?editable=true returns all roles for an instructor."""
+        instructor = InstructorFactory.create(course_key=self.course_key)
+        url = reverse('instructor_api_v2:course_team_roles', kwargs={'course_id': str(self.course_key)})
+        self.client.force_authenticate(user=instructor)
+        response = self.client.get(url, {'editable': 'true'})
+        assert response.status_code == status.HTTP_200_OK
+        returned_roles = {r['role'] for r in response.data['results']}
+        # Instructor should see both course roles and forum roles
+        assert 'instructor' in returned_roles
+        assert 'staff' in returned_roles
+        assert 'Administrator' in returned_roles
+
+    def test_roles_without_editable_param_returns_all(self):
+        """GET /team/roles without editable param returns all roles regardless of user."""
+        url = reverse('instructor_api_v2:course_team_roles', kwargs={'course_id': str(self.course_key)})
+        self.client.force_authenticate(user=self.forum_admin)
+        response = self.client.get(url)
+        assert response.status_code == status.HTTP_200_OK
+        returned_roles = {r['role'] for r in response.data['results']}
+        # Without editable param, all roles are returned
+        assert 'instructor' in returned_roles
+        assert 'staff' in returned_roles
+        assert 'Administrator' in returned_roles

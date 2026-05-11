@@ -28,6 +28,8 @@ from openedx_events.content_authoring.signals import (
     LIBRARY_CONTAINER_DELETED,
     LIBRARY_CONTAINER_UPDATED,
 )
+from openedx_events.testing import EventsIsolationMixin
+from openedx_events.tooling import OpenEdxPublicSignal
 from user_tasks.models import UserTaskStatus
 
 from common.djangoapps.student.tests.factories import UserFactory
@@ -37,12 +39,20 @@ from ..models import ContentLibrary
 from .base import ContentLibrariesRestApiTest
 
 
-class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
+class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest, EventsIsolationMixin):
     """
     Tests for Content Library API collections methods.
 
     Same guidelines as ContentLibrariesTestCase.
     """
+
+    @classmethod
+    def setUpClass(cls):
+        """Test setup"""
+        super().setUpClass()
+        # By default, errors thrown in signal handlers get suppressed. We want to see them though!
+        # https://github.com/openedx/openedx-events/issues/569
+        cls.allow_send_events_failure(*(s.event_type for s in OpenEdxPublicSignal.all_events()))
 
     def setUp(self) -> None:
         super().setUp()
@@ -115,7 +125,7 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
             description="Description for Collection 4",
             created_by=self.user.id,
         )
-        assert collection.key == "COL4"
+        assert collection.collection_code == "COL4"
         assert collection.title == "Collection 4"
         assert collection.description == "Description for Collection 4"
         assert collection.created_by == self.user
@@ -150,10 +160,10 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
 
         self.col1 = api.update_library_collection(
             self.lib1.library_key,
-            self.col1.key,
+            self.col1.collection_code,
             title="New title for Collection 1",
         )
-        assert self.col1.key == "COL1"
+        assert self.col1.collection_code == "COL1"
         assert self.col1.title == "New title for Collection 1"
         assert self.col1.description == "Description for Collection 1"
         assert self.col1.created_by == self.user
@@ -177,7 +187,7 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
         with self.assertRaises(api.ContentLibraryCollectionNotFound) as exc:  # noqa: F841, PT027
             api.update_library_collection(
                 self.lib1.library_key,
-                self.col2.key,
+                self.col2.collection_code,
             )
 
     def test_delete_library_collection(self) -> None:
@@ -187,7 +197,7 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
         assert self.lib1.learning_package_id is not None
         content_api.delete_collection(
             self.lib1.learning_package_id,
-            self.col1.key,
+            self.col1.collection_code,
             hard_delete=True,
         )
 
@@ -211,7 +221,7 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
 
         self.col1 = api.update_library_collection_items(
             self.lib1.library_key,
-            self.col1.key,
+            self.col1.collection_code,
             opaque_keys=[
                 LibraryUsageLocatorV2.from_string(self.lib1_problem_block["id"]),
                 LibraryUsageLocatorV2.from_string(self.lib1_html_block["id"]),
@@ -222,7 +232,7 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
 
         self.col1 = api.update_library_collection_items(
             self.lib1.library_key,
-            self.col1.key,
+            self.col1.collection_code,
             opaque_keys=[
                 LibraryUsageLocatorV2.from_string(self.lib1_html_block["id"]),
             ],
@@ -240,7 +250,7 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
 
         api.update_library_collection_items(
             self.lib1.library_key,
-            self.col1.key,
+            self.col1.collection_code,
             opaque_keys=[
                 LibraryUsageLocatorV2.from_string(self.lib1_problem_block["id"]),
                 LibraryUsageLocatorV2.from_string(self.lib1_html_block["id"]),
@@ -252,41 +262,7 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
         self.assertDictContainsEntries(
             event_receiver.call_args_list[0].kwargs,
             {
-                "signal": CONTENT_OBJECT_ASSOCIATIONS_CHANGED,
-                "sender": None,
-                "content_object": ContentObjectChangedData(
-                    object_id=self.lib1_problem_block["id"],
-                    changes=["collections"],
-                ),
-            },
-        )
-        self.assertDictContainsEntries(
-            event_receiver.call_args_list[1].kwargs,
-            {
-                "signal": CONTENT_OBJECT_ASSOCIATIONS_CHANGED,
-                "sender": None,
-                "content_object": ContentObjectChangedData(
-                    object_id=self.lib1_html_block["id"],
-                    changes=["collections"],
-                ),
-            },
-        )
-        self.assertDictContainsEntries(
-            event_receiver.call_args_list[2].kwargs,
-            {
-                "signal": CONTENT_OBJECT_ASSOCIATIONS_CHANGED,
-                "sender": None,
-                "content_object": ContentObjectChangedData(
-                    object_id=self.unit1["id"],
-                    changes=["collections"],
-                ),
-            },
-        )
-        self.assertDictContainsEntries(
-            event_receiver.call_args_list[3].kwargs,
-            {
                 "signal": LIBRARY_COLLECTION_UPDATED,
-                "sender": None,
                 "library_collection": LibraryCollectionData(
                     collection_key=api.library_collection_locator(
                         self.lib1.library_key,
@@ -295,12 +271,42 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
                 ),
             },
         )
+        self.assertDictContainsEntries(
+            event_receiver.call_args_list[1].kwargs,
+            {
+                "signal": CONTENT_OBJECT_ASSOCIATIONS_CHANGED,
+                "content_object": ContentObjectChangedData(
+                    object_id=self.lib1_problem_block["id"],
+                    changes=["collections"],
+                ),
+            },
+        )
+        self.assertDictContainsEntries(
+            event_receiver.call_args_list[2].kwargs,
+            {
+                "signal": CONTENT_OBJECT_ASSOCIATIONS_CHANGED,
+                "content_object": ContentObjectChangedData(
+                    object_id=self.lib1_html_block["id"],
+                    changes=["collections"],
+                ),
+            },
+        )
+        self.assertDictContainsEntries(
+            event_receiver.call_args_list[3].kwargs,
+            {
+                "signal": CONTENT_OBJECT_ASSOCIATIONS_CHANGED,
+                "content_object": ContentObjectChangedData(
+                    object_id=self.unit1["id"],
+                    changes=["collections"],
+                ),
+            },
+        )
 
     def test_update_collection_components_from_wrong_library(self) -> None:
         with self.assertRaises(api.ContentLibraryBlockNotFound) as exc:  # noqa: PT027
             api.update_library_collection_items(
                 self.lib2.library_key,
-                self.col2.key,
+                self.col2.collection_code,
                 opaque_keys=[
                     LibraryUsageLocatorV2.from_string(self.lib1_problem_block["id"]),
                     LibraryUsageLocatorV2.from_string(self.lib1_html_block["id"]),
@@ -318,13 +324,15 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
         component = api.get_component_from_usage_key(UsageKeyV2.from_string(self.lib2_problem_block["id"]))
         api.set_library_item_collections(
             library_key=self.lib2.library_key,
-            entity_key=component.publishable_entity.key,
-            collection_keys=[self.col2.key, self.col3.key],
+            entity_ref=component.publishable_entity.entity_ref,
+            collection_keys=[self.col2.collection_code, self.col3.collection_code],
         )
 
         assert self.lib2.learning_package_id is not None
-        assert len(content_api.get_collection(self.lib2.learning_package_id, self.col2.key).entities.all()) == 1
-        assert len(content_api.get_collection(self.lib2.learning_package_id, self.col3.key).entities.all()) == 1
+        col2 = content_api.get_collection(self.lib2.learning_package_id, self.col2.collection_code)
+        col3 = content_api.get_collection(self.lib2.learning_package_id, self.col3.collection_code)
+        assert len(col2.entities.all()) == 1
+        assert len(col3.entities.all()) == 1
 
         self.assertDictContainsEntries(
             event_receiver.call_args_list[0].kwargs,
@@ -343,19 +351,21 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
         assert all(event["signal"] == LIBRARY_COLLECTION_UPDATED for event in collection_update_events)
         assert {event["library_collection"] for event in collection_update_events} == {
             LibraryCollectionData(
-                collection_key=api.library_collection_locator(self.lib2.library_key, collection_key=self.col2.key),
-                background=True,
+                collection_key=api.library_collection_locator(
+                    self.lib2.library_key, collection_key=self.col2.collection_code
+                )
             ),
             LibraryCollectionData(
-                collection_key=api.library_collection_locator(self.lib2.library_key, collection_key=self.col3.key),
-                background=True,
-            )
+                collection_key=api.library_collection_locator(
+                    self.lib2.library_key, collection_key=self.col3.collection_code
+                )
+            ),
         }
 
     def test_delete_library_block(self) -> None:
         api.update_library_collection_items(
             self.lib1.library_key,
-            self.col1.key,
+            self.col1.collection_code,
             opaque_keys=[
                 LibraryUsageLocatorV2.from_string(self.lib1_problem_block["id"]),
                 LibraryUsageLocatorV2.from_string(self.lib1_html_block["id"]),
@@ -375,10 +385,8 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
                 "sender": None,
                 "library_collection": LibraryCollectionData(
                     collection_key=api.library_collection_locator(
-                        self.lib1.library_key,
-                        collection_key=self.col1.key,
+                        self.lib1.library_key, collection_key=self.col1.collection_code
                     ),
-                    background=True,
                 ),
             },
         )
@@ -386,7 +394,7 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
     def test_delete_library_container(self) -> None:
         api.update_library_collection_items(
             self.lib1.library_key,
-            self.col1.key,
+            self.col1.collection_code,
             opaque_keys=[
                 LibraryUsageLocatorV2.from_string(self.lib1_problem_block["id"]),
                 LibraryUsageLocatorV2.from_string(self.lib1_html_block["id"]),
@@ -415,9 +423,8 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
                 "library_collection": LibraryCollectionData(
                     collection_key=api.library_collection_locator(
                         self.lib1.library_key,
-                        collection_key=self.col1.key,
+                        collection_key=self.col1.collection_code,
                     ),
-                    background=True,
                 ),
             },
         )
@@ -429,7 +436,7 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
                 "library_container": LibraryContainerData(
                     container_key=self.subsection1.container_key,
                     background=False,
-                )
+                ),
             },
         )
 
@@ -497,19 +504,22 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
         )
 
     def test_restore_library_block(self) -> None:
+        usage_key = LibraryUsageLocatorV2.from_string(self.lib1_problem_block["id"])
         api.update_library_collection_items(
             self.lib1.library_key,
-            self.col1.key,
+            self.col1.collection_code,
             opaque_keys=[
-                LibraryUsageLocatorV2.from_string(self.lib1_problem_block["id"]),
+                usage_key,
                 LibraryUsageLocatorV2.from_string(self.lib1_html_block["id"]),
             ],
         )
 
+        api.delete_library_block(usage_key)
+
         event_receiver = mock.Mock()
         LIBRARY_COLLECTION_UPDATED.connect(event_receiver)
 
-        api.restore_library_block(LibraryUsageLocatorV2.from_string(self.lib1_problem_block["id"]))
+        api.restore_library_block(usage_key)
 
         assert event_receiver.call_count == 1
         self.assertDictContainsEntries(
@@ -520,9 +530,8 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
                 "library_collection": LibraryCollectionData(
                     collection_key=api.library_collection_locator(
                         self.lib1.library_key,
-                        collection_key=self.col1.key,
+                        collection_key=self.col1.collection_code,
                     ),
-                    background=True,
                 ),
             },
         )
@@ -539,7 +548,7 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
         # Add component. Note: collections are not part of the draft/publish cycle so this is not a draft change.
         api.update_library_collection_items(
             self.lib1.library_key,
-            self.col1.key,
+            self.col1.collection_code,
             opaque_keys=[
                 LibraryUsageLocatorV2.from_string(self.lib1_html_block["id"]),
                 LibraryUsageLocatorV2.from_string(new_problem_block["id"]),
@@ -549,6 +558,8 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
         collection_update_event_receiver = mock.Mock()
         LIBRARY_COLLECTION_UPDATED.connect(collection_update_event_receiver)
 
+        # Reverting the change essentially deletes the item, so we should get an event that the collection's contents
+        # have been updated.
         api.revert_changes(self.lib1.library_key)
 
         assert collection_update_event_receiver.call_count == 1
@@ -560,7 +571,7 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
                 "library_collection": LibraryCollectionData(
                     collection_key=api.library_collection_locator(
                         self.lib1.library_key,
-                        collection_key=self.col1.key,
+                        collection_key=self.col1.collection_code,
                     ),
                 ),
             },
@@ -574,7 +585,7 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
         # Add components and publish
         api.update_library_collection_items(
             self.lib1.library_key,
-            self.col1.key,
+            self.col1.collection_code,
             opaque_keys=[
                 LibraryUsageLocatorV2.from_string(self.lib1_problem_block["id"]),
                 LibraryUsageLocatorV2.from_string(self.lib1_html_block["id"])
@@ -599,7 +610,7 @@ class ContentLibraryCollectionsTest(ContentLibrariesRestApiTest):
                 "library_collection": LibraryCollectionData(
                     collection_key=api.library_collection_locator(
                         self.lib1.library_key,
-                        collection_key=self.col1.key,
+                        collection_key=self.col1.collection_code,
                     ),
                 ),
             },
