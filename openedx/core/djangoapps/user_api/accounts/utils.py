@@ -206,15 +206,14 @@ def redact_and_delete_social_auth(user_id, skip_delete=False):
     """
     Redact PII from all UserSocialAuth records for the given user, then delete them.
 
-    Redaction happens before deletion so that any observers see only sanitised data.
     Downstream copies of data may use soft-deletes, and redacting before deleting
     ensures PII for retired users (or future retirements) is not retained.
-    The uid format matches ``get_redacted_social_auth_uid()``.
 
     ``skip_delete`` should only be set to True when called from the pre_delete signal
     handler, where deletion is already in progress.
     """
     social_auth_queryset = UserSocialAuth.objects.filter(user_id=user_id)
+    # Important: this redacted uid must match the format used by ``get_redacted_social_auth_uid()``.
     social_auth_queryset.update(
         uid=Concat(
             Value(REDACTED_SOCIAL_AUTH_UID_PREFIX),

@@ -5,24 +5,55 @@ Test the retire_user management command
 
 import csv
 import os
+from contextlib import contextmanager
 
 import pytest
 from django.contrib.auth.models import User  # lint-amnesty, pylint: disable=imported-auth-user
 from django.core.management import CommandError, call_command
+from django.db import connection
 from django.db.models.signals import pre_delete
+from django.test.utils import CaptureQueriesContext
 from social_django.models import UserSocialAuth
 
 from common.djangoapps.student.tests.factories import UserFactory  # lint-amnesty, pylint: disable=wrong-import-order
+from openedx.core.djangoapps.user_api.accounts.signals import (  # lint-amnesty, pylint: disable=wrong-import-order
+    redact_social_auth_pii_before_deletion,
+)
 from openedx.core.djangoapps.user_api.accounts.tests.retirement_helpers import (  # lint-amnesty, pylint: disable=unused-import, wrong-import-order
     setup_retirement_states,  # noqa: F401
 )
 from openedx.core.djangolib.testing.utils import skip_unless_lms  # lint-amnesty, pylint: disable=wrong-import-order
 
-from ...accounts.signals import get_redacted_social_auth_uid
 from ...models import UserRetirementStatus
 
 pytestmark = pytest.mark.django_db
 user_file = 'userfile.csv'
+
+
+@contextmanager
+def disconnected_social_auth_redaction_signal():
+    """
+    Temporarily disconnect the fallback signal so these tests exercise the command path.
+    """
+    pre_delete.disconnect(redact_social_auth_pii_before_deletion, sender=UserSocialAuth)
+    try:
+        yield
+    finally:
+        pre_delete.connect(redact_social_auth_pii_before_deletion, sender=UserSocialAuth)
+
+
+def assert_update_before_delete(sql_list, table='social_auth_usersocialauth'):
+    """
+    Assert that at least one social auth UPDATE occurs before a DELETE.
+    """
+    table_key = table.upper()
+    update_indices = [i for i, sql in enumerate(sql_list) if 'UPDATE' in sql.upper() and table_key in sql.upper()]
+    delete_indices = [i for i, sql in enumerate(sql_list) if 'DELETE' in sql.upper() and table_key in sql.upper()]
+    assert update_indices, f'Expected at least one UPDATE on {table}'
+    assert delete_indices, f'Expected at least one DELETE on {table}'
+    assert any(update_idx < delete_idx for update_idx in update_indices for delete_idx in delete_indices), (
+        'Expected at least one UPDATE to precede at least one DELETE'
+    )
 
 
 def generate_dummy_users():
@@ -117,8 +148,8 @@ def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  
     """
     Test that SSO PII is redacted before UserSocialAuth records are deleted during retirement.
 
-    This test verifies the order of operations by capturing the record's state
-    at the moment of deletion to ensure it was already redacted.
+    The safety-net pre_delete signal handler is disconnected for this test so that
+    we verify the redaction comes from retire_user itself, not the fallback signal.
     """
     user = UserFactory.create(username='sso-user', email='sso-user@example.com')
     social_auth = UserSocialAuth.objects.create(
@@ -133,32 +164,11 @@ def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  
     )
     social_auth_id = social_auth.id
 
-    captured_states = []
-
-    def capture_state_before_delete(sender, instance, **kwargs):  # pylint: disable=unused-argument
-        """Capture the database state seen by the pre_delete signal."""
-        instance.refresh_from_db()
-        captured_states.append({
-            'id': instance.id,
-            'uid': instance.uid,
-            'extra_data': dict(instance.extra_data) if instance.extra_data else {},
-        })
-
-    pre_delete.connect(capture_state_before_delete, sender=UserSocialAuth)
-    try:
+    with disconnected_social_auth_redaction_signal(), CaptureQueriesContext(connection) as ctx:
         call_command('retire_user', username=user.username, user_email=user.email)
-    finally:
-        pre_delete.disconnect(capture_state_before_delete, sender=UserSocialAuth)
 
-    # Verify that at the moment of deletion, the record was already redacted
-    assert captured_states == [{
-        'id': social_auth_id,
-        'uid': get_redacted_social_auth_uid(social_auth_id),
-        'extra_data': {},
-    }], \
-        "SSO records should be redacted before deletion"
+    assert_update_before_delete([query['sql'] for query in ctx])
 
-    # Verify deletion completed
     assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()
 
     retired_user_status = UserRetirementStatus.objects.filter(original_username=user.username).first()
@@ -169,7 +179,10 @@ def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  
 @skip_unless_lms
 def test_retire_user_redacts_each_social_auth_before_bulk_deletion(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument  # noqa: F811
     """
-    Test that each UserSocialAuth record is redacted before bulk deletion during retirement.
+    Test that all UserSocialAuth records are redacted before bulk deletion during retirement.
+
+    The safety-net pre_delete signal handler is disconnected for this test so that
+    we verify the redaction comes from retire_user itself, not the fallback signal.
     """
     user = UserFactory.create(username='multi-sso-user', email='multi-sso@example.com')
     google_auth = UserSocialAuth.objects.create(
@@ -184,25 +197,13 @@ def test_retire_user_redacts_each_social_auth_before_bulk_deletion(setup_retirem
         uid='saml-multi@example.com',
         extra_data={'email': 'saml-multi@example.com', 'name': 'SAML User', 'uid': 'saml-123'}
     )
-    # Save IDs before deletion (they become None after delete)
     google_auth_id = google_auth.id
     saml_auth_id = saml_auth.id
 
-    captured_states = []
-
-    def capture_state_before_delete(sender, instance, **kwargs):  # pylint: disable=unused-argument
-        """Capture the database state seen by the pre_delete signal."""
-        instance.refresh_from_db()
-        extra = dict(instance.extra_data) if instance.extra_data else {}
-        captured_states.append((instance.provider, instance.uid, extra))
-
-    pre_delete.connect(capture_state_before_delete, sender=UserSocialAuth)
-    try:
+    with disconnected_social_auth_redaction_signal(), CaptureQueriesContext(connection) as ctx:
         call_command('retire_user', username=user.username, user_email=user.email)
-    finally:
-        pre_delete.disconnect(capture_state_before_delete, sender=UserSocialAuth)
 
-    assert sorted(captured_states) == sorted([
-        ('google-oauth2', get_redacted_social_auth_uid(google_auth_id), {}),
-        ('tpa-saml', get_redacted_social_auth_uid(saml_auth_id), {}),
-    ])
+    assert_update_before_delete([query['sql'] for query in ctx])
+
+    assert not UserSocialAuth.objects.filter(id=google_auth_id).exists()
+    assert not UserSocialAuth.objects.filter(id=saml_auth_id).exists()

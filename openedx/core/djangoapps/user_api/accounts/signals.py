@@ -40,7 +40,7 @@ def redact_social_auth_pii_before_deletion(sender, instance, **kwargs):  # pylin
     Safety-net signal handler that redacts PII on any UserSocialAuth before deletion.
 
     Records deleted via ``redact_and_delete_social_auth`` will already be redacted;
-    this handler is a fallback for any other deletion path.
+    this handler is a fallback for any missed deletion path.
     """
     redacted_uid = get_redacted_social_auth_uid(instance.pk)
 
