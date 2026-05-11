@@ -3,7 +3,6 @@
 import ddt
 from completion import models
 from completion.test_utils import CompletionWaffleTestMixin
-from unittest import mock
 from django.db import connection
 from django.db.models.signals import pre_delete
 from django.test import TestCase
