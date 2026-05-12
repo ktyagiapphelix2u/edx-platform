@@ -610,9 +610,7 @@ class EmailChangeConfirmationTests(EmailTestMixin, EmailTemplateTagMixin, CacheI
         assert PendingEmailChange.objects.count() == 0
 
     @skip_unless_lms
-    @patch('common.djangoapps.student.signals.receivers.EmailChangeMiddleware.register_email_change')
-    @patch('common.djangoapps.student.views.management.ace')
-    def test_successful_email_change_redacts_pending_email_before_delete(self, _ace_mail, _mock_register):
+    def test_successful_email_change_redacts_pending_email_before_delete(self):
         with CaptureQueriesContext(connection) as ctx:
             confirm_email_change(self.request, self.key)
 
