@@ -640,8 +640,8 @@ class EmailChangeConfirmationTests(EmailTestMixin, EmailTemplateTagMixin, CacheI
 
     @patch('common.djangoapps.student.views.PendingEmailChange.objects.get', Mock(side_effect=TestException))
     def test_always_rollback(self):
-        connection = transaction.get_connection()
-        with patch.object(connection, 'rollback', wraps=connection.rollback) as mock_rollback:
+        db_connection = transaction.get_connection()
+        with patch.object(db_connection, 'rollback', wraps=db_connection.rollback) as mock_rollback:
             with pytest.raises(TestException):
                 confirm_email_change(self.request, self.key)
 
