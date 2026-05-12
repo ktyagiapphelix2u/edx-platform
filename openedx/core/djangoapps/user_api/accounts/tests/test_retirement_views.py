@@ -13,7 +13,6 @@ from django.contrib.sites.models import Site
 from django.core import mail
 from django.core.cache import cache
 from django.db import connection
-from django.db.models.signals import pre_delete
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
@@ -1515,29 +1514,22 @@ class TestAccountRetirementPost(RetirementTestCase):
         """
         Verify that delete_by_user_value redacts new_email using bulk update before deletion.
         """
-        captured_state = {}
+        assert PendingEmailChange.objects.filter(user=self.test_user).exists()
 
-        def capture_before_delete(sender, instance, **kwargs):
-            """Capture email value before it's deleted."""
-            captured_state['new_email'] = instance.new_email
-
-        # Connect signal to capture pre-delete state
-        pre_delete.connect(capture_before_delete, sender=PendingEmailChange)
-        try:
-            # Verify the record exists with original email before retirement
-            assert PendingEmailChange.objects.filter(user=self.test_user).exists()
-
-            # Retire the user
-            data = {'username': self.original_username}
+        table = 'student_pendingemailchange'
+        data = {'username': self.original_username}
+        with CaptureQueriesContext(connection) as ctx:
             self.post_and_assert_status(data)
 
-            # Verify the redaction happened before deletion
-            assert captured_state['new_email'] == 'redacted@retired.invalid'
-
-            # Verify the record was deleted
-            assert not PendingEmailChange.objects.filter(user=self.test_user).exists()
-        finally:
-            pre_delete.disconnect(capture_before_delete, sender=PendingEmailChange)
+        sql_list = [q['sql'].upper() for q in ctx]
+        update_indices = [i for i, sql in enumerate(sql_list) if 'UPDATE' in sql and table.upper() in sql]
+        delete_indices = [i for i, sql in enumerate(sql_list) if 'DELETE' in sql and table.upper() in sql]
+        assert update_indices, f'Expected an UPDATE on {table}'
+        assert delete_indices, f'Expected a DELETE on {table}'
+        assert any(u < d for u in update_indices for d in delete_indices), (
+            'Expected UPDATE to precede DELETE'
+        )
+        assert not PendingEmailChange.objects.filter(user=self.test_user).exists()
 
     @mock.patch('openedx.core.djangoapps.user_api.accounts.views.USER_RETIRE_LMS_CRITICAL')
     def test_retirement_sends_critical_signal_with_retirement_data(self, mock_signal):

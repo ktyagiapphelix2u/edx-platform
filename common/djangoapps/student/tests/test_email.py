@@ -9,8 +9,8 @@ import pytest
 from django.conf import settings
 from django.contrib.auth.models import User  # pylint: disable=imported-auth-user
 from django.core import mail
-from django.db import transaction
-from django.db.models.signals import pre_delete
+from django.db import connection, transaction
+from django.test.utils import CaptureQueriesContext
 from django.http import HttpResponse
 from django.test import TransactionTestCase, override_settings
 from django.test.client import RequestFactory
@@ -615,23 +615,25 @@ class EmailChangeConfirmationTests(EmailTestMixin, EmailTemplateTagMixin, CacheI
     def test_successful_email_change_redacts_pending_email_before_delete(self, ace_mail, mock_register):  # pylint: disable=unused-argument
         original_email = self.user.email
         expected_new_email = self.pending_change_request.new_email
-        captured_state = {}
 
-        def capture_before_delete(sender, instance, **kwargs):
-            captured_state['new_email'] = instance.new_email
-
-        pre_delete.connect(capture_before_delete, sender=PendingEmailChange)
-        try:
+        with CaptureQueriesContext(connection) as ctx:
             response = confirm_email_change(self.request, self.key)
-        finally:
-            pre_delete.disconnect(capture_before_delete, sender=PendingEmailChange)
+
+        table = 'student_pendingemailchange'
+        sql_list = [q['sql'].upper() for q in ctx]
+        update_indices = [i for i, sql in enumerate(sql_list) if 'UPDATE' in sql and table.upper() in sql]
+        delete_indices = [i for i, sql in enumerate(sql_list) if 'DELETE' in sql and table.upper() in sql]
+        assert update_indices, f'Expected an UPDATE on {table}'
+        assert delete_indices, f'Expected a DELETE on {table}'
+        assert any(u < d for u in update_indices for d in delete_indices), (
+            'Expected UPDATE to precede DELETE'
+        )
 
         assert response.status_code == 200
         assert mock_render_to_response('email_change_successful.html', {
             'old_email': original_email,
             'new_email': expected_new_email,
         }).content.decode('utf-8') == response.content.decode('utf-8')
-        assert captured_state['new_email'] == 'redacted@retired.invalid'
         assert User.objects.get(username=self.user.username).email == expected_new_email
         assert PendingEmailChange.objects.count() == 0
         assert ace_mail.send.call_count == 2

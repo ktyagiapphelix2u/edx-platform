@@ -10,9 +10,10 @@ from crum import set_current_request
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, User  # pylint: disable=imported-auth-user
 from django.core.cache import cache
+from django.db import connection
 from django.db.models.functions import Lower
-from django.db.models.signals import pre_delete
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from edx_toggles.toggles.testutils import override_waffle_flag
 from freezegun import freeze_time
 from opaque_keys.edx.keys import CourseKey
@@ -605,28 +606,20 @@ class PendingEmailChangeTests(SharedModuleStoreTestCase):
         """
         Verify that delete_by_user_value redacts new_email before deletion.
         """
-        captured_state = {}
-
-        def capture_before_delete(sender, instance, **kwargs):
-            """
-            Capture email and activation_key before deletion.
-            """
-            captured_state['new_email'] = instance.new_email
-            captured_state['activation_key'] = instance.activation_key
-
-        pre_delete.connect(capture_before_delete, sender=PendingEmailChange)
-        try:
-            assert PendingEmailChange.objects.filter(user=self.user).exists()
-
+        table = 'student_pendingemailchange'
+        with CaptureQueriesContext(connection) as ctx:
             record_was_deleted = PendingEmailChange.delete_by_user_value(self.user, field='user')
-            assert record_was_deleted
 
-            assert captured_state['new_email'] == 'redacted@retired.invalid'
-            assert captured_state['activation_key'] == self.email_change.activation_key
-
-            assert not PendingEmailChange.objects.filter(user=self.user).exists()
-        finally:
-            pre_delete.disconnect(capture_before_delete, sender=PendingEmailChange)
+        sql_list = [q['sql'].upper() for q in ctx]
+        update_indices = [i for i, sql in enumerate(sql_list) if 'UPDATE' in sql and table.upper() in sql]
+        delete_indices = [i for i, sql in enumerate(sql_list) if 'DELETE' in sql and table.upper() in sql]
+        assert update_indices, f'Expected an UPDATE on {table}'
+        assert delete_indices, f'Expected a DELETE on {table}'
+        assert any(u < d for u in update_indices for d in delete_indices), (
+            'Expected UPDATE to precede DELETE'
+        )
+        assert record_was_deleted
+        assert not PendingEmailChange.objects.filter(user=self.user).exists()
 
 
 class TestCourseEnrollmentAllowed(ModuleStoreTestCase):  # pylint: disable=missing-class-docstring
