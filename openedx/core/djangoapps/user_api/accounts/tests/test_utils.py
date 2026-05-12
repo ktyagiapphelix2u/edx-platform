@@ -200,7 +200,7 @@ class RedactAndDeleteSocialAuthTest(TestCase):
             extra_data=extra_data,
         )
 
-    @data(
+    @ddt.data(
         {
             'provider': 'google-oauth2',
             'uid': 'google@example.com',
@@ -212,7 +212,7 @@ class RedactAndDeleteSocialAuthTest(TestCase):
             'extra_data': {'email': 'saml@example.com', 'name': 'SAML User', 'uid': 'saml-uid'}
         }
     )
-    @unpack
+    @ddt.unpack
     def test_redact_and_delete_redacts_multiple_sso_providers(self, provider, uid, extra_data):
         """
         Test that redact_and_delete_social_auth redacts and deletes records for
