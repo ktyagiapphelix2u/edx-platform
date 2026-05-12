@@ -460,6 +460,7 @@ class EmailChangeConfirmationTests(EmailTestMixin, EmailTemplateTagMixin, CacheI
         self.req_factory = RequestFactory()
         self.request = self.req_factory.get('unused_url')
         self.request.user = self.user
+        self.request.session = {}
         self.pending_change_request = PendingEmailChangeFactory.create(user=self.user)
         self.key = self.pending_change_request.activation_key
 
