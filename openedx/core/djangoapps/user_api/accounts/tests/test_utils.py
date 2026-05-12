@@ -141,6 +141,7 @@ class CompletionUtilsTestCase(SharedModuleStoreTestCase, CompletionWaffleTestMix
         assert empty_block_url is None
 
 
+@ddt.ddt
 @skip_unless_lms
 class RedactAndDeleteSocialAuthTest(TestCase):
     """
