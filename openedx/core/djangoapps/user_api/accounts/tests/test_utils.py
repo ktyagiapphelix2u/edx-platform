@@ -227,17 +227,3 @@ class RedactAndDeleteSocialAuthTest(TestCase):
 
         self._assert_update_before_delete([query['sql'] for query in ctx])
         assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()
-
-    def test_atomicity_of_redact_and_delete(self):
-        """
-        Test that redact_and_delete_social_auth operates within an atomic block.
-        """
-        social_auth = self.create_social_auth()
-        social_auth_id = social_auth.pk
-
-        with CaptureQueriesContext(connection) as ctx:
-            redact_and_delete_social_auth(self.user.id)
-
-        # Ensure atomicity by verifying no partial updates or deletions occurred.
-        self._assert_update_before_delete([query['sql'] for query in ctx])
-        assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()
