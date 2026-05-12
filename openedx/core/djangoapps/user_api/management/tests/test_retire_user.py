@@ -144,66 +144,41 @@ def test_retire_with_username_email_userfile(setup_retirement_states):  # pylint
 
 
 @skip_unless_lms
-def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument  # noqa: F811
+@pytest.mark.parametrize('social_auth_configs', [
+    # Single SSO provider
+    [
+        {'provider': 'google-oauth2', 'uid': 'sso@example.com',
+         'extra_data': {'email': 'sso@example.com', 'name': 'SSO Test User', 'id': '123456789'}},
+    ],
+    # Multiple SSO providers
+    [
+        {'provider': 'google-oauth2', 'uid': 'google@example.com',
+         'extra_data': {'email': 'google@example.com', 'name': 'Google User'}},
+        {'provider': 'tpa-saml', 'uid': 'saml@example.com',
+         'extra_data': {'email': 'saml@example.com', 'name': 'SAML User', 'uid': 'saml-123'}},
+    ],
+])
+def test_retire_user_redacts_sso_pii_before_deletion(setup_retirement_states, social_auth_configs):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument  # noqa: F811
     """
     Test that SSO PII is redacted before UserSocialAuth records are deleted during retirement.
+    Covers both single and multiple SSO provider scenarios.
 
-    The safety-net pre_delete signal handler is disconnected for this test so that
-    we verify the redaction comes from retire_user itself, not the fallback signal.
+    The safety-net pre_delete signal handler is disconnected so we verify the redaction
+    comes from retire_user itself, not the fallback signal.
     """
     user = UserFactory.create(username='sso-user', email='sso-user@example.com')
-    social_auth = UserSocialAuth.objects.create(
-        user=user,
-        provider='google-oauth2',
-        uid='sso-user@example.com',
-        extra_data={
-            'email': 'sso-user@example.com',
-            'name': 'SSO Test User',
-            'id': '123456789',
-        }
-    )
-    social_auth_id = social_auth.id
+    auth_ids = [
+        UserSocialAuth.objects.create(user=user, **cfg).id
+        for cfg in social_auth_configs
+    ]
 
     with disconnected_social_auth_redaction_signal(), CaptureQueriesContext(connection) as ctx:
         call_command('retire_user', username=user.username, user_email=user.email)
 
     assert_update_before_delete([query['sql'] for query in ctx])
-
-    assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()
+    for auth_id in auth_ids:
+        assert not UserSocialAuth.objects.filter(id=auth_id).exists()
 
     retired_user_status = UserRetirementStatus.objects.filter(original_username=user.username).first()
     assert retired_user_status is not None
     assert retired_user_status.original_email == 'sso-user@example.com'
-
-
-@skip_unless_lms
-def test_retire_user_redacts_each_social_auth_before_bulk_deletion(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument  # noqa: F811
-    """
-    Test that all UserSocialAuth records are redacted before bulk deletion during retirement.
-
-    The safety-net pre_delete signal handler is disconnected for this test so that
-    we verify the redaction comes from retire_user itself, not the fallback signal.
-    """
-    user = UserFactory.create(username='multi-sso-user', email='multi-sso@example.com')
-    google_auth = UserSocialAuth.objects.create(
-        user=user,
-        provider='google-oauth2',
-        uid='google-multi@example.com',
-        extra_data={'email': 'google-multi@example.com', 'name': 'Google User'}
-    )
-    saml_auth = UserSocialAuth.objects.create(
-        user=user,
-        provider='tpa-saml',
-        uid='saml-multi@example.com',
-        extra_data={'email': 'saml-multi@example.com', 'name': 'SAML User', 'uid': 'saml-123'}
-    )
-    google_auth_id = google_auth.id
-    saml_auth_id = saml_auth.id
-
-    with disconnected_social_auth_redaction_signal(), CaptureQueriesContext(connection) as ctx:
-        call_command('retire_user', username=user.username, user_email=user.email)
-
-    assert_update_before_delete([query['sql'] for query in ctx])
-
-    assert not UserSocialAuth.objects.filter(id=google_auth_id).exists()
-    assert not UserSocialAuth.objects.filter(id=saml_auth_id).exists()

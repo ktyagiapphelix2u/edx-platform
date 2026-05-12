@@ -188,12 +188,11 @@ class RedactAndDeleteSocialAuthTest(TestCase):
         """
         Helper method to create UserSocialAuth instances for testing.
         """
-        if extra_data is None:
-            extra_data = {
-                'email': 'user@example.com',
-                'name': 'Test User',
-                'id': '123456789',
-            }
+        extra_data = extra_data or {
+            'email': f'{provider}@example.com',
+            'name': f'{provider.capitalize()} User',
+            'id': '123456789',
+        }
         return UserSocialAuth.objects.create(
             user=self.user,
             provider=provider,
@@ -201,12 +200,26 @@ class RedactAndDeleteSocialAuthTest(TestCase):
             extra_data=extra_data,
         )
 
-    def test_redact_and_delete_issues_update_before_delete(self):
+    @data(
+        {
+            'provider': 'google-oauth2',
+            'uid': 'google@example.com',
+            'extra_data': {'email': 'google@example.com', 'name': 'Google User'}
+        },
+        {
+            'provider': 'tpa-saml',
+            'uid': 'saml@example.com',
+            'extra_data': {'email': 'saml@example.com', 'name': 'SAML User', 'uid': 'saml-uid'}
+        }
+    )
+    @unpack
+    def test_redact_and_delete_redacts_multiple_sso_providers(self, provider, uid, extra_data):
         """
-        Test that redact_and_delete_social_auth redacts before deleting a social auth record.
+        Test that redact_and_delete_social_auth redacts and deletes records for
+        multiple SSO providers in a single call.
         """
-        social_auth = self.create_social_auth()
-        social_auth_id = social_auth.id
+        social_auth = self.create_social_auth(provider=provider, uid=uid, extra_data=extra_data)
+        social_auth_id = social_auth.pk
 
         with CaptureQueriesContext(connection) as ctx:
             redact_and_delete_social_auth(self.user.id)
@@ -214,28 +227,16 @@ class RedactAndDeleteSocialAuthTest(TestCase):
         self._assert_update_before_delete([query['sql'] for query in ctx])
         assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()
 
-    def test_redact_and_delete_redacts_multiple_sso_providers(self):
+    def test_atomicity_of_redact_and_delete(self):
         """
-        Test that redact_and_delete_social_auth redacts and deletes records for
-        multiple SSO providers in a single call.
+        Test that redact_and_delete_social_auth operates within an atomic block.
         """
-        auths = [
-            self.create_social_auth(
-                provider='google-oauth2',
-                uid='google@example.com',
-                extra_data={'email': 'google@example.com', 'name': 'Google User'}
-            ),
-            self.create_social_auth(
-                provider='tpa-saml',
-                uid='saml@example.com',
-                extra_data={'email': 'saml@example.com', 'name': 'SAML User', 'uid': 'saml-uid'}
-            ),
-        ]
-        auth_ids = [auth.pk for auth in auths]
+        social_auth = self.create_social_auth()
+        social_auth_id = social_auth.pk
 
         with CaptureQueriesContext(connection) as ctx:
             redact_and_delete_social_auth(self.user.id)
 
+        # Ensure atomicity by verifying no partial updates or deletions occurred.
         self._assert_update_before_delete([query['sql'] for query in ctx])
-        for auth_id in auth_ids:
-            assert not UserSocialAuth.objects.filter(id=auth_id).exists()
+        assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()

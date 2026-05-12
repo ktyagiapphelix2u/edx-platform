@@ -11,6 +11,7 @@ import waffle  # pylint: disable=invalid-django-waffle-import
 from completion.models import BlockCompletion
 from completion.waffle import ENABLE_COMPLETION_TRACKING_SWITCH
 from django.conf import settings
+from django.db import transaction
 from django.db.models import CharField, Value
 from django.db.models.functions import Cast, Concat
 from django.utils.translation import gettext as _
@@ -213,17 +214,21 @@ def redact_and_delete_social_auth(user_id, skip_delete=False):
     handler, where deletion is already in progress.
     """
     social_auth_queryset = UserSocialAuth.objects.filter(user_id=user_id)
-    # Important: this redacted uid must match the format used by ``get_redacted_social_auth_uid()``.
-    social_auth_queryset.update(
-        uid=Concat(
-            Value(REDACTED_SOCIAL_AUTH_UID_PREFIX),
-            Cast('id', output_field=CharField()),
-            Value(REDACTED_SOCIAL_AUTH_UID_SUFFIX),
-        ),
-        extra_data={},
-    )
-    if not skip_delete:
-        social_auth_queryset.delete()
+    # Wrap update + delete in an atomic block so that a failure on DELETE rolls
+    # back the UPDATE too, leaving no partially-redacted records and allowing
+    # the caller to retry the full operation.
+    with transaction.atomic():
+        # Important: this redacted uid must match the format used by ``get_redacted_social_auth_uid()``.
+        social_auth_queryset.update(
+            uid=Concat(
+                Value(REDACTED_SOCIAL_AUTH_UID_PREFIX),
+                Cast('id', output_field=CharField()),
+                Value(REDACTED_SOCIAL_AUTH_UID_SUFFIX),
+            ),
+            extra_data={},
+        )
+        if not skip_delete:
+            social_auth_queryset.delete()
 
 
 def create_retirement_request_and_deactivate_account(user):

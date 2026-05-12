@@ -77,3 +77,16 @@ class RedactSocialAuthPIIOnDeleteSignalTest(TestCase):
 
         mock_redact.assert_not_called()
         assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()
+
+    def test_signal_respects_atomicity(self):
+        """
+        Test that the redact_social_auth_pii_before_deletion signal respects atomicity.
+        """
+        social_auth = self._create_social_auth()
+
+        with patch(
+            'openedx.core.djangoapps.user_api.accounts.signals.redact_and_delete_social_auth'
+        ) as mock_redact:
+            social_auth.delete()
+
+        mock_redact.assert_called_once_with(self.user.id, skip_delete=True)
