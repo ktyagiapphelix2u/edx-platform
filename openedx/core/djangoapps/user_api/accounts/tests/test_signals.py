@@ -42,16 +42,15 @@ class RedactSocialAuthPIIOnDeleteSignalTest(TestCase):
         assert get_redacted_social_auth_uid(42) == 'redacted-before-delete-42@safe.com'
         assert get_redacted_social_auth_uid(1) == 'redacted-before-delete-1@safe.com'
 
-    def test_signal_warns_and_redacts_when_not_already_redacted(self):
+    @patch('openedx.core.djangoapps.user_api.accounts.signals.redact_and_delete_social_auth')
+    def test_signal_warns_and_redacts_when_not_already_redacted(self, mock_redact):
         """
         When a UserSocialAuth is deleted without prior redaction, the signal handler
         should log a warning and call redact_and_delete_social_auth with skip_delete=True.
         """
         social_auth = self._create_social_auth()
 
-        with patch(
-            'openedx.core.djangoapps.user_api.accounts.signals.redact_and_delete_social_auth'
-        ) as mock_redact, self.assertLogs(
+        with self.assertLogs(
             'openedx.core.djangoapps.user_api.accounts.signals', level=logging.WARNING
         ) as log_ctx:
             social_auth.delete()
@@ -59,7 +58,8 @@ class RedactSocialAuthPIIOnDeleteSignalTest(TestCase):
         mock_redact.assert_called_once_with(self.user.id, skip_delete=True)
         assert any('was deleted without first being redacted' in msg for msg in log_ctx.output)
 
-    def test_signal_skips_warning_and_redaction_when_already_redacted(self):
+    @patch('openedx.core.djangoapps.user_api.accounts.signals.redact_and_delete_social_auth')
+    def test_signal_skips_warning_and_redaction_when_already_redacted(self, mock_redact):
         """
         When a UserSocialAuth is already redacted before deletion, the signal handler
         should not log a warning and should not call redact_and_delete_social_auth.
@@ -70,10 +70,7 @@ class RedactSocialAuthPIIOnDeleteSignalTest(TestCase):
         social_auth.save(update_fields=['uid', 'extra_data'])
         social_auth_id = social_auth.id
 
-        with patch(
-            'openedx.core.djangoapps.user_api.accounts.signals.redact_and_delete_social_auth'
-        ) as mock_redact:
-            social_auth.delete()
+        social_auth.delete()
 
         mock_redact.assert_not_called()
         assert not UserSocialAuth.objects.filter(id=social_auth_id).exists()

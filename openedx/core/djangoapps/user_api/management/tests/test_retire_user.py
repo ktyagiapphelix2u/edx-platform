@@ -16,11 +16,14 @@ from django.test.utils import CaptureQueriesContext
 from social_django.models import UserSocialAuth
 
 from common.djangoapps.student.tests.factories import UserFactory  # lint-amnesty, pylint: disable=wrong-import-order
-from openedx.core.djangoapps.user_api.accounts.signals import (  # lint-amnesty, pylint: disable=wrong-import-order
+from openedx.core.djangoapps.user_api.accounts.signals import (
     redact_social_auth_pii_before_deletion,
 )
-from openedx.core.djangoapps.user_api.accounts.tests.retirement_helpers import (  # lint-amnesty, pylint: disable=unused-import, wrong-import-order
+from openedx.core.djangoapps.user_api.accounts.tests.retirement_helpers import (
     setup_retirement_states,  # noqa: F401
+)
+from openedx.core.djangoapps.user_api.accounts.tests.test_utils import (
+    assert_update_before_delete,
 )
 from openedx.core.djangolib.testing.utils import skip_unless_lms  # pylint: disable=wrong-import-order
 
@@ -29,7 +32,7 @@ from ...models import UserRetirementStatus
 pytestmark = pytest.mark.django_db
 user_file = 'userfile.csv'
 
-
+# Use a context manager to guarantee signal reconnection between tests.
 @contextmanager
 def disconnected_social_auth_redaction_signal():
     """
@@ -40,20 +43,6 @@ def disconnected_social_auth_redaction_signal():
         yield
     finally:
         pre_delete.connect(redact_social_auth_pii_before_deletion, sender=UserSocialAuth)
-
-
-def assert_update_before_delete(sql_list, table='social_auth_usersocialauth'):
-    """
-    Assert that at least one social auth UPDATE occurs before a DELETE.
-    """
-    table_key = table.upper()
-    update_indices = [i for i, sql in enumerate(sql_list) if 'UPDATE' in sql.upper() and table_key in sql.upper()]
-    delete_indices = [i for i, sql in enumerate(sql_list) if 'DELETE' in sql.upper() and table_key in sql.upper()]
-    assert update_indices, f'Expected at least one UPDATE on {table}'
-    assert delete_indices, f'Expected at least one DELETE on {table}'
-    assert any(update_idx < delete_idx for update_idx in update_indices for delete_idx in delete_indices), (
-        'Expected at least one UPDATE to precede at least one DELETE'
-    )
 
 
 def generate_dummy_users():
