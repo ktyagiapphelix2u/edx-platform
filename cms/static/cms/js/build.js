@@ -21,10 +21,8 @@
             'js/factories/base',
             'js/factories/course_create_rerun',
             'js/factories/export',
-            'js/factories/group_configurations',
             'js/factories/index',
             'js/factories/outline',
-            'js/factories/settings_advanced'
         ]),
         /**
          * By default all the configuration for optimization happens from the command

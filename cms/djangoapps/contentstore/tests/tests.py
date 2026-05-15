@@ -2,9 +2,7 @@
 This test file will test registration, login, activation, and session activity timeouts
 
 TODO: Rewrite several of these assertions so that they check the output of the REST or Python
-APIs rather than parsing HTML from the deprecated legacy frontend pages. In particular, any
-test case using override_waffle_flag(toggles.LEGACY_STUDIO_*, True) will need to be fixed.
-Part of https://github.com/openedx/edx-platform/issues/36275.
+APIs rather than parsing HTML from the deprecated legacy frontend pages.
 """
 
 
@@ -17,10 +15,8 @@ from django.conf import settings
 from django.core.cache import cache
 from django.test.utils import override_settings
 from django.urls import reverse
-from edx_toggles.toggles.testutils import override_waffle_flag
 from pytz import UTC
 
-from cms.djangoapps.contentstore import toggles
 from cms.djangoapps.contentstore.tests.test_course_settings import CourseTestCase
 from cms.djangoapps.contentstore.tests.utils import AjaxEnabledTestClient, parse_json, registration, user
 from cms.djangoapps.contentstore.utils import get_studio_home_url
@@ -237,20 +233,19 @@ class CourseKeyVerificationTestCase(CourseTestCase):
         super().setUp()
         self.course = CourseFactory.create(org='edX', number='test_course_key', display_name='Test Course')
 
-    @data(('edX/test_course_key/Test_Course', 200), ('garbage:edX+test_course_key+Test_Course', 404))
+    @data(('edX/test_course_key/Test_Course', 302, 200), ('garbage:edX+test_course_key+Test_Course', 404, 404))
     @unpack
-    @override_waffle_flag(toggles.LEGACY_STUDIO_IMPORT, True)
-    def test_course_key_decorator(self, course_key, status_code):
+    def test_course_key_decorator(self, course_key, import_status_code, import_status_handler_code):
         """
         Tests for the ensure_valid_course_key decorator.
         """
         url = f'/import/{course_key}'
         resp = self.client.get_html(url)
-        self.assertEqual(resp.status_code, status_code)  # noqa: PT009
+        self.assertEqual(resp.status_code, import_status_code)  # noqa: PT009
 
         url = '/import_status/{course_key}/{filename}'.format(
             course_key=course_key,
             filename='xyz.tar.gz'
         )
         resp = self.client.get_html(url)
-        self.assertEqual(resp.status_code, status_code)  # noqa: PT009
+        self.assertEqual(resp.status_code, import_status_handler_code)  # noqa: PT009

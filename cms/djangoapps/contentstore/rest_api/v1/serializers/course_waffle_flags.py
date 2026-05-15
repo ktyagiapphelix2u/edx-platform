@@ -81,8 +81,7 @@ class CourseWaffleFlagsSerializer(serializers.Serializer):
         """
         Method to get the use_new_advanced_settings_page switch
         """
-        course_key = self.get_course_key()
-        return toggles.use_new_advanced_settings_page(course_key)
+        return True
 
     def get_use_new_grading_page(self, obj):
         """
@@ -112,15 +111,13 @@ class CourseWaffleFlagsSerializer(serializers.Serializer):
         """
         Method to get the use_new_import_page switch
         """
-        course_key = self.get_course_key()
-        return toggles.use_new_import_page(course_key)
+        return True
 
     def get_use_new_export_page(self, obj):
         """
         Method to get the use_new_export_page switch
         """
-        course_key = self.get_course_key()
-        return toggles.use_new_export_page(course_key)
+        return True
 
     def get_use_new_files_uploads_page(self, obj):
         """
@@ -194,8 +191,7 @@ class CourseWaffleFlagsSerializer(serializers.Serializer):
         """
         Method to get the use_new_group_configurations_page switch
         """
-        course_key = self.get_course_key()
-        return toggles.use_new_group_configurations_page(course_key)
+        return True
 
     def get_enable_course_optimizer(self, obj):
         """

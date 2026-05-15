@@ -29,7 +29,6 @@ from milestones.tests.utils import MilestonesTestCaseMixin
 from pytz import UTC
 from xblock.fields import Date
 
-from cms.djangoapps.contentstore import toggles
 from cms.djangoapps.contentstore.utils import reverse_course_url, reverse_usage_url
 from cms.djangoapps.models.settings.course_grading import (
     GRADING_POLICY_CHANGED_EVENT_TYPE,
@@ -123,7 +122,6 @@ class CourseAdvanceSettingViewTest(CourseTestCase, MilestonesTestCaseMixin):
         CourseStaffRole(self.course.id).add_users(self.nonstaff)
 
     @override_settings(FEATURES={'DISABLE_MOBILE_COURSE_AVAILABLE': True})
-    @override_waffle_flag(toggles.LEGACY_STUDIO_ADVANCED_SETTINGS, True)
     def test_mobile_field_available(self):
 
         """
@@ -131,10 +129,9 @@ class CourseAdvanceSettingViewTest(CourseTestCase, MilestonesTestCaseMixin):
         when DISABLE_MOBILE_COURSE_AVAILABLE is true.
         """
 
-        response = self.client.get_html(self.course_setting_url)
-        start = response.content.decode('utf-8').find("mobile_available")
-        end = response.content.decode('utf-8').find("}", start)
-        settings_fields = json.loads(response.content.decode('utf-8')[start + len("mobile_available: "):end + 1])
+        response = self.client.get(self.course_setting_url, HTTP_ACCEPT='application/json')
+        data = json.loads(response.content.decode('utf-8'))
+        settings_fields = data.get('mobile_available')
 
         self.assertEqual(settings_fields["display_name"], "Mobile Course Available")  # noqa: PT009
         self.assertEqual(settings_fields["deprecated"], True)  # noqa: PT009
@@ -146,7 +143,6 @@ class CourseAdvanceSettingViewTest(CourseTestCase, MilestonesTestCaseMixin):
         (False, True, True)
     )
     @ddt.unpack
-    @override_waffle_flag(toggles.LEGACY_STUDIO_ADVANCED_SETTINGS, True)
     def test_discussion_fields_available(self, is_pages_and_resources_enabled,
                                          is_legacy_discussion_setting_enabled, fields_visible):
         """
@@ -155,11 +151,27 @@ class CourseAdvanceSettingViewTest(CourseTestCase, MilestonesTestCaseMixin):
 
         with override_waffle_flag(ENABLE_PAGES_AND_RESOURCES_MICROFRONTEND, is_pages_and_resources_enabled):
             with override_waffle_flag(OVERRIDE_DISCUSSION_LEGACY_SETTINGS_FLAG, is_legacy_discussion_setting_enabled):
-                response = self.client.get_html(self.course_setting_url).content.decode('utf-8')
-                self.assertEqual('allow_anonymous' in response, fields_visible)  # noqa: PT009
-                self.assertEqual('allow_anonymous_to_peers' in response, fields_visible)  # noqa: PT009
-                self.assertEqual('discussion_blackouts' in response, fields_visible)  # noqa: PT009
-                self.assertEqual('discussion_topics' in response, fields_visible)  # noqa: PT009
+                response = self.client.get(self.course_setting_url, HTTP_ACCEPT='application/json')
+                data = json.loads(response.content.decode('utf-8'))
+                self.assertEqual('allow_anonymous' in data, fields_visible)  # noqa: PT009
+                self.assertEqual('allow_anonymous_to_peers' in data, fields_visible)  # noqa: PT009
+                self.assertEqual('discussion_blackouts' in data, fields_visible)  # noqa: PT009
+                self.assertEqual('discussion_topics' in data, fields_visible)  # noqa: PT009
+
+    @ddt.data(False, True)
+    def test_disable_advanced_settings_feature(self, disable_advanced_settings):
+        """
+        When DISABLE_ADVANCED_SETTINGS is enabled, non-staff users should receive
+        a 403 on the advanced settings URL; staff users should always be redirected.
+        """
+        with override_settings(FEATURES={
+            'DISABLE_ADVANCED_SETTINGS': disable_advanced_settings,
+        }, COURSE_AUTHORING_MICROFRONTEND_URL='https://mfe.example'):
+            response = self.non_staff_client.get_html(self.course_setting_url)
+            self.assertEqual(response.status_code, 403 if disable_advanced_settings else 302)  # noqa: PT009
+
+            response = self.client.get_html(self.course_setting_url)
+            self.assertEqual(response.status_code, 302)  # noqa: PT009
 
     def test_grading_handler_redirects_to_mfe(self):
         """grading_handler redirects to the authoring MFE."""
