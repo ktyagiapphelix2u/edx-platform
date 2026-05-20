@@ -32,6 +32,7 @@ from common.djangoapps.student.views import (
 from common.djangoapps.third_party_auth.views import inactive_user_view
 from common.djangoapps.util.testing import EventTestMixin
 from openedx.core.djangoapps.ace_common.tests.mixins import EmailTemplateTagMixin
+from openedx.core.djangoapps.user_api.accounts.tests.test_utils import assert_update_before_delete
 from openedx.core.djangoapps.site_configuration import helpers as configuration_helpers
 from openedx.core.djangolib.testing.utils import CacheIsolationMixin, CacheIsolationTestCase, skip_unless_lms
 from xmodule.modulestore.django import modulestore  # pylint: disable=wrong-import-order
@@ -600,30 +601,17 @@ class EmailChangeConfirmationTests(EmailTestMixin, EmailTemplateTagMixin, CacheI
     )
     @ddt.unpack
     def test_successful_email_change(self, test_body_type, test_marketing_enabled, mock_email_change_signal):
-        with patch.dict(settings.FEATURES, {'ENABLE_MKTG_SITE': test_marketing_enabled}):
-            self.assertChangeEmailSent(test_body_type)
-            assert mock_email_change_signal.called
+        with CaptureQueriesContext(connection) as ctx:
+            with patch.dict(settings.FEATURES, {'ENABLE_MKTG_SITE': test_marketing_enabled}):
+                self.assertChangeEmailSent(test_body_type)
+                assert mock_email_change_signal.called
+
+        assert_update_before_delete([q['sql'] for q in ctx], table=PendingEmailChange._meta.db_table)
 
         meta = json.loads(UserProfile.objects.get(user=self.user).meta)
         assert 'old_emails' in meta
         assert self.user.email == meta['old_emails'][0][0]
         assert self.pending_change_request.new_email == User.objects.get(username=self.user.username).email
-        assert PendingEmailChange.objects.count() == 0
-
-    @skip_unless_lms
-    def test_successful_email_change_redacts_pending_email_before_delete(self):
-        with CaptureQueriesContext(connection) as ctx:
-            confirm_email_change(self.request, self.key)
-
-        table = 'student_pendingemailchange'
-        sql_list = [q['sql'].upper() for q in ctx]
-        update_indices = [i for i, sql in enumerate(sql_list) if 'UPDATE' in sql and table.upper() in sql]
-        delete_indices = [i for i, sql in enumerate(sql_list) if 'DELETE' in sql and table.upper() in sql]
-        assert update_indices, f'Expected an UPDATE on {table}'
-        assert delete_indices, f'Expected a DELETE on {table}'
-        assert any(u < d for u in update_indices for d in delete_indices), (
-            'Expected UPDATE to precede DELETE'
-        )
         assert PendingEmailChange.objects.count() == 0
 
     @patch('common.djangoapps.student.views.PendingEmailChange.objects.get', Mock(side_effect=TestException))

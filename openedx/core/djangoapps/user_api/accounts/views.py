@@ -1170,7 +1170,7 @@ class AccountRetirementView(ViewSet):
 
             self.retire_entitlement_support_detail(user)
 
-            # Retire misc. PII models. PendingEmailChange redacts before deletion for downstream safety.
+            # Retire misc. models that may contain PII of this user
             PendingEmailChange.delete_by_user_value(user, field="user")
             UserOrgTag.delete_by_user_value(user, field="user")
 
