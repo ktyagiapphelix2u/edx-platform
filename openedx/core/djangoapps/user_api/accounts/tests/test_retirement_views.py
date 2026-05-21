@@ -67,7 +67,7 @@ from openedx.core.djangoapps.user_api.models import (
     UserRetirementPartnerReportingStatus,
     UserRetirementStatus,
 )
-from openedx.core.djangolib.testing.utils import skip_unless_lms
+from openedx.core.djangolib.testing.utils import assert_update_before_delete, skip_unless_lms
 from xmodule.modulestore.tests.django_utils import ModuleStoreTestCase
 from xmodule.modulestore.tests.factories import CourseFactory
 
@@ -1469,7 +1469,10 @@ class TestAccountRetirementPost(RetirementTestCase):
     @mock.patch('openedx.core.djangoapps.user_api.accounts.views.remove_profile_images')
     def test_retire_user(self, mock_remove_profile_images, mock_get_profile_image_names):
         data = {'username': self.original_username}
-        self.post_and_assert_status(data)
+        with CaptureQueriesContext(connection) as ctx:
+            self.post_and_assert_status(data)
+
+        assert_update_before_delete([q['sql'] for q in ctx], table=PendingEmailChange._meta.db_table)
 
         self.test_user.refresh_from_db()
         self.test_user.profile.refresh_from_db()  # pylint: disable=no-member
@@ -1509,27 +1512,6 @@ class TestAccountRetirementPost(RetirementTestCase):
         self.post_and_assert_status(data)
         fake_completed_retirement(self.test_user)
         self.post_and_assert_status(data)
-
-    def test_retire_user_redacts_pending_email_before_delete(self):
-        """
-        Verify that delete_by_user_value redacts new_email using bulk update before deletion.
-        """
-        assert PendingEmailChange.objects.filter(user=self.test_user).exists()
-
-        table = 'student_pendingemailchange'
-        data = {'username': self.original_username}
-        with CaptureQueriesContext(connection) as ctx:
-            self.post_and_assert_status(data)
-
-        sql_list = [q['sql'].upper() for q in ctx]
-        update_indices = [i for i, sql in enumerate(sql_list) if 'UPDATE' in sql and table.upper() in sql]
-        delete_indices = [i for i, sql in enumerate(sql_list) if 'DELETE' in sql and table.upper() in sql]
-        assert update_indices, f'Expected an UPDATE on {table}'
-        assert delete_indices, f'Expected a DELETE on {table}'
-        assert any(u < d for u in update_indices for d in delete_indices), (
-            'Expected UPDATE to precede DELETE'
-        )
-        assert not PendingEmailChange.objects.filter(user=self.test_user).exists()
 
     @mock.patch('openedx.core.djangoapps.user_api.accounts.views.USER_RETIRE_LMS_CRITICAL')
     def test_retirement_sends_critical_signal_with_retirement_data(self, mock_signal):

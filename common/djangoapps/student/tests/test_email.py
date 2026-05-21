@@ -9,11 +9,10 @@ import pytest
 from django.conf import settings
 from django.contrib.auth.models import User  # pylint: disable=imported-auth-user
 from django.core import mail
-from django.db import connection, transaction
+from django.db import transaction
 from django.http import HttpResponse
 from django.test import TransactionTestCase, override_settings
 from django.test.client import RequestFactory
-from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils.html import escape
 from testfixtures import LogCapture
@@ -33,7 +32,6 @@ from common.djangoapps.third_party_auth.views import inactive_user_view
 from common.djangoapps.util.testing import EventTestMixin
 from openedx.core.djangoapps.ace_common.tests.mixins import EmailTemplateTagMixin
 from openedx.core.djangoapps.site_configuration import helpers as configuration_helpers
-from openedx.core.djangoapps.user_api.accounts.tests.test_utils import assert_update_before_delete
 from openedx.core.djangolib.testing.utils import CacheIsolationMixin, CacheIsolationTestCase, skip_unless_lms
 from xmodule.modulestore.django import modulestore  # pylint: disable=wrong-import-order
 from xmodule.modulestore.tests.django_utils import (
@@ -601,12 +599,9 @@ class EmailChangeConfirmationTests(EmailTestMixin, EmailTemplateTagMixin, CacheI
     )
     @ddt.unpack
     def test_successful_email_change(self, test_body_type, test_marketing_enabled, mock_email_change_signal):
-        with CaptureQueriesContext(connection) as ctx:
-            with patch.dict(settings.FEATURES, {'ENABLE_MKTG_SITE': test_marketing_enabled}):
-                self.assertChangeEmailSent(test_body_type)
-                assert mock_email_change_signal.called
-
-        assert_update_before_delete([q['sql'] for q in ctx], table=PendingEmailChange._meta.db_table)
+        with patch.dict(settings.FEATURES, {'ENABLE_MKTG_SITE': test_marketing_enabled}):
+            self.assertChangeEmailSent(test_body_type)
+            assert mock_email_change_signal.called
 
         meta = json.loads(UserProfile.objects.get(user=self.user).meta)
         assert 'old_emails' in meta
