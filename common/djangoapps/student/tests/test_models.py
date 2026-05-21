@@ -44,7 +44,8 @@ from openedx.core.djangoapps.content.course_overviews.models import CourseOvervi
 from openedx.core.djangoapps.content.course_overviews.tests.factories import CourseOverviewFactory
 from openedx.core.djangoapps.schedules.models import Schedule
 from openedx.core.djangoapps.user_api.preferences.api import set_user_preference
-from openedx.core.djangolib.testing.utils import assert_update_before_delete, skip_unless_lms
+from openedx.core.djangolib.testing.sql_assertions import assert_update_before_delete
+from openedx.core.djangolib.testing.utils import skip_unless_lms
 from xmodule.modulestore import ModuleStoreEnum  # pylint: disable=wrong-import-order
 from xmodule.modulestore.tests.django_utils import (  # pylint: disable=wrong-import-order
     ModuleStoreTestCase,
@@ -649,6 +650,33 @@ class TestCourseEnrollmentAllowed(ModuleStoreTestCase):  # pylint: disable=missi
             email=self.email
         )
         assert user_search_results.exists()
+
+    def test_email_redacted_before_delete(self):
+        """
+        Verify email redaction runs before delete for downstream soft-delete systems.
+        """
+        other_course_key = CourseKey.from_string('course-v1:edX+OtherX+Other_Course')
+        other_record = CourseEnrollmentAllowed.objects.create(
+            email=self.email,
+            course_id=other_course_key,
+        )
+
+        with CaptureQueriesContext(connection) as ctx:
+            is_successful = CourseEnrollmentAllowed.delete_by_user_value(
+                value=self.email,
+                field='email'
+            )
+
+        assert is_successful
+        assert_update_before_delete(
+            [q['sql'] for q in ctx],
+            table=CourseEnrollmentAllowed._meta.db_table,
+            require_id_filter=True,
+            expected_redacted_value='redacted@retired.invalid',
+        )
+        assert not CourseEnrollmentAllowed.objects.filter(
+            id__in=[self.allowed_enrollment.id, other_record.id]
+        ).exists()
 
     def test_may_enroll_and_unenrolled_result_is_based_on_unmarked_user_field(self):
         """

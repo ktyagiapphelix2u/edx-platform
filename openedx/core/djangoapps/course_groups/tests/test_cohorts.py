@@ -8,15 +8,17 @@ from unittest.mock import call, patch
 import ddt
 import pytest
 from django.contrib.auth.models import AnonymousUser, User  # pylint: disable=imported-auth-user
-from django.db import IntegrityError
+from django.db import IntegrityError, connection
 from django.http import Http404
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from opaque_keys.edx.keys import CourseKey
 from opaque_keys.edx.locator import CourseLocator
 from openedx_events.testing import OpenEdxEventsTestMixin
 
 from common.djangoapps.student.models import CourseEnrollment
 from common.djangoapps.student.tests.factories import UserFactory
+from openedx.core.djangolib.testing.sql_assertions import assert_update_before_delete
 from xmodule.modulestore.django import modulestore  # pylint: disable=wrong-import-order
 from xmodule.modulestore.tests.django_utils import (  # pylint: disable=wrong-import-order
     TEST_DATA_SPLIT_MODULESTORE,
@@ -807,3 +809,36 @@ class TestUnregisteredLearnerCohortAssignments(TestCase):
 
         assert not was_retired
         assert self.cohort_assignment.email == known_learner_email
+
+    def test_email_redacted_before_delete(self):
+        """
+        Verify email redaction runs before delete for downstream soft-delete systems.
+        """
+        other_course_key = CourseKey.from_string('course-v1:edX+OtherX+Other_Course')
+        other_cohort = CourseUserGroup.objects.create(
+            name='OtherCohort',
+            course_id=other_course_key,
+            group_type=CourseUserGroup.COHORT,
+        )
+        other_assignment = UnregisteredLearnerCohortAssignments.objects.create(
+            course_user_group=other_cohort,
+            course_id=other_course_key,
+            email='learner@example.com',
+        )
+
+        with CaptureQueriesContext(connection) as ctx:
+            was_retired = UnregisteredLearnerCohortAssignments.delete_by_user_value(
+                value='learner@example.com',
+                field='email'
+            )
+
+        assert was_retired
+        assert_update_before_delete(
+            [q['sql'] for q in ctx],
+            table=UnregisteredLearnerCohortAssignments._meta.db_table,
+            require_id_filter=True,
+            expected_redacted_value='redacted@retired.invalid',
+        )
+        assert not UnregisteredLearnerCohortAssignments.objects.filter(
+            id__in=[self.cohort_assignment.id, other_assignment.id]
+        ).exists()

@@ -67,7 +67,8 @@ from openedx.core.djangoapps.user_api.models import (
     UserRetirementPartnerReportingStatus,
     UserRetirementStatus,
 )
-from openedx.core.djangolib.testing.utils import assert_update_before_delete, skip_unless_lms
+from openedx.core.djangolib.testing.sql_assertions import assert_update_before_delete
+from openedx.core.djangolib.testing.utils import skip_unless_lms
 from xmodule.modulestore.tests.django_utils import ModuleStoreTestCase
 from xmodule.modulestore.tests.factories import CourseFactory
 
