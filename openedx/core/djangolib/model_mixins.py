@@ -51,10 +51,11 @@ class DeletableByUserValue:
             return False
 
         record_ids = list(records_matching_user_value.values_list('id', flat=True))
+        records_matching_ids = cls.objects.filter(id__in=record_ids)
 
         redact_fields = cls.redact_before_delete_fields()
         if redact_fields:
-            cls.objects.filter(id__in=record_ids).update(**redact_fields)
+            records_matching_ids.update(**redact_fields)
 
-        cls.objects.filter(id__in=record_ids).delete()
+        records_matching_ids.delete()
         return True
