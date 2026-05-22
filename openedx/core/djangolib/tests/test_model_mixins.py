@@ -2,8 +2,9 @@
 Tests for model_mixins.py.
 """
 
-import ddt
 from unittest import TestCase, mock
+
+import ddt
 
 from openedx.core.djangolib.model_mixins import DeletableByUserValue
 
@@ -43,7 +44,7 @@ class TestDeletableByUserValue(TestCase):
         """
         assert not self.NonRedactingModel.redact_before_delete_fields()
 
-    @mock.patch.object(NonRedactingModel, 'objects')
+    @mock.patch.object(NonRedactingModel, 'objects', create=True)
     def test_delete_by_user_value_returns_false_when_no_matches(self, mock_objects):
         """
         Verify no updates or deletes occur when no rows match the filter.
@@ -72,7 +73,7 @@ class TestDeletableByUserValue(TestCase):
         """
         model_cls = getattr(self, model_name)
         queryset = self._make_queryset(exists=True)
-        with mock.patch.object(model_cls, 'objects') as mock_objects:
+        with mock.patch.object(model_cls, 'objects', create=True) as mock_objects:
             mock_objects.filter.return_value = queryset
 
             was_deleted = model_cls.delete_by_user_value(value='learner@example.com', field='email')
