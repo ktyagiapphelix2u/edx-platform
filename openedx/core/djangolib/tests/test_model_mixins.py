@@ -84,7 +84,6 @@ class TestDeletableByUserValue(TestCase):
         assert self.RedactingModel.objects.filter.call_args_list == [
             mock.call(email='learner@example.com'),
             mock.call(id__in=[11, 12]),
-            mock.call(id__in=[11, 12]),
         ]
         queryset.update.assert_called_once_with(email='redacted@retired.invalid')
         queryset.delete.assert_called_once_with()
