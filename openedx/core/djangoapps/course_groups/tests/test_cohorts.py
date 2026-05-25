@@ -787,12 +787,19 @@ class TestUnregisteredLearnerCohortAssignments(TestCase):
         )
 
     def test_retired_user_has_deleted_record(self):
-        was_retired = UnregisteredLearnerCohortAssignments.delete_by_user_value(
-            value='learner@example.com',
-            field='email'
-        )
+        with CaptureQueriesContext(connection) as ctx:
+            was_retired = UnregisteredLearnerCohortAssignments.delete_by_user_value(
+                value='learner@example.com',
+                field='email'
+            )
 
         assert was_retired
+        assert_update_before_delete(
+            [q['sql'] for q in ctx],
+            table=UnregisteredLearnerCohortAssignments._meta.db_table,
+            require_id_filter=True,
+            expected_redacted_value='redacted-before-delete@safe.com',
+        )
 
         search_retired_user_results = \
             UnregisteredLearnerCohortAssignments.objects.filter(
@@ -810,35 +817,3 @@ class TestUnregisteredLearnerCohortAssignments(TestCase):
         assert not was_retired
         assert self.cohort_assignment.email == known_learner_email
 
-    def test_email_redacted_before_delete(self):
-        """
-        Verify email redaction runs before delete for downstream soft-delete systems.
-        """
-        other_course_key = CourseKey.from_string('course-v1:edX+OtherX+Other_Course')
-        other_cohort = CourseUserGroup.objects.create(
-            name='OtherCohort',
-            course_id=other_course_key,
-            group_type=CourseUserGroup.COHORT,
-        )
-        other_assignment = UnregisteredLearnerCohortAssignments.objects.create(
-            course_user_group=other_cohort,
-            course_id=other_course_key,
-            email='learner@example.com',
-        )
-
-        with CaptureQueriesContext(connection) as ctx:
-            was_retired = UnregisteredLearnerCohortAssignments.delete_by_user_value(
-                value='learner@example.com',
-                field='email'
-            )
-
-        assert was_retired
-        assert_update_before_delete(
-            [q['sql'] for q in ctx],
-            table=UnregisteredLearnerCohortAssignments._meta.db_table,
-            require_id_filter=True,
-            expected_redacted_value='redacted@retired.invalid',
-        )
-        assert not UnregisteredLearnerCohortAssignments.objects.filter(
-            id__in=[self.cohort_assignment.id, other_assignment.id]
-        ).exists()

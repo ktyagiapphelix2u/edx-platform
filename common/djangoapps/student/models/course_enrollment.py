@@ -1653,7 +1653,7 @@ class CourseEnrollmentAllowed(DeletableByUserValue, models.Model):
         """
         Redact email before deleting records for downstream soft-delete systems.
         """
-        return {'email': 'redacted@retired.invalid'}
+        return {'email': 'redacted-before-delete@safe.com'}
 
 
 class CourseEnrollmentAttribute(models.Model):

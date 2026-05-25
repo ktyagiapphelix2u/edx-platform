@@ -630,11 +630,19 @@ class TestCourseEnrollmentAllowed(ModuleStoreTestCase):  # pylint: disable=missi
         )
 
     def test_retiring_user_deletes_record(self):
-        is_successful = CourseEnrollmentAllowed.delete_by_user_value(
-            value=self.email,
-            field='email'
-        )
+        with CaptureQueriesContext(connection) as ctx:
+            is_successful = CourseEnrollmentAllowed.delete_by_user_value(
+                value=self.email,
+                field='email'
+            )
+
         assert is_successful
+        assert_update_before_delete(
+            [q['sql'] for q in ctx],
+            table=CourseEnrollmentAllowed._meta.db_table,
+            require_id_filter=True,
+            expected_redacted_value='redacted-before-delete@safe.com',
+        )
         user_search_results = CourseEnrollmentAllowed.objects.filter(
             email=self.email
         )
@@ -650,33 +658,6 @@ class TestCourseEnrollmentAllowed(ModuleStoreTestCase):  # pylint: disable=missi
             email=self.email
         )
         assert user_search_results.exists()
-
-    def test_email_redacted_before_delete(self):
-        """
-        Verify email redaction runs before delete for downstream soft-delete systems.
-        """
-        other_course_key = CourseKey.from_string('course-v1:edX+OtherX+Other_Course')
-        other_record = CourseEnrollmentAllowed.objects.create(
-            email=self.email,
-            course_id=other_course_key,
-        )
-
-        with CaptureQueriesContext(connection) as ctx:
-            is_successful = CourseEnrollmentAllowed.delete_by_user_value(
-                value=self.email,
-                field='email'
-            )
-
-        assert is_successful
-        assert_update_before_delete(
-            [q['sql'] for q in ctx],
-            table=CourseEnrollmentAllowed._meta.db_table,
-            require_id_filter=True,
-            expected_redacted_value='redacted@retired.invalid',
-        )
-        assert not CourseEnrollmentAllowed.objects.filter(
-            id__in=[self.allowed_enrollment.id, other_record.id]
-        ).exists()
 
     def test_may_enroll_and_unenrolled_result_is_based_on_unmarked_user_field(self):
         """

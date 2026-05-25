@@ -917,7 +917,7 @@ class PendingEmailChange(DeletableByUserValue, models.Model):  # noqa: DJ008
         """
         Redact PII fields before delete in downstream soft-delete systems.
         """
-        return {'new_email': 'redacted@retired.invalid'}
+        return {'new_email': 'redacted-before-delete@safe.com'}
 
     def request_change(self, email):
         """Request a change to a user's email.

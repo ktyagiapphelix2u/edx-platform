@@ -964,8 +964,11 @@ def confirm_email_change(request, key):
         user.email = pec.new_email
         user.save()
 
-        # Redacts pending email before deletion
-        PendingEmailChange.delete_by_user_value(user, field="user")
+        # Reuse the loaded record to avoid an additional lookup before delete.
+        redact_fields = PendingEmailChange.redact_before_delete_fields()
+        if redact_fields:
+            PendingEmailChange.objects.filter(id=pec.id).update(**redact_fields)
+        pec.delete()
 
         # And send it to the new email...
         msg.recipient = Recipient(user.id, user.email)

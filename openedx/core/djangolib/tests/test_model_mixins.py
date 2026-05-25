@@ -27,7 +27,7 @@ class TestDeletableByUserValue(TestCase):
 
         @classmethod
         def redact_before_delete_fields(cls):
-            return {'email': 'redacted@retired.invalid'}
+            return {'email': 'redacted-before-delete@safe.com'}
 
     def _make_queryset(self, exists):
         """
@@ -61,7 +61,7 @@ class TestDeletableByUserValue(TestCase):
 
     @ddt.data(
         ('NonRedactingModel', None),
-        ('RedactingModel', {'email': 'redacted@retired.invalid'}),
+        ('RedactingModel', {'email': 'redacted-before-delete@safe.com'}),
     )
     @ddt.unpack
     def test_delete_by_user_value(self, model_name, expected_redact_fields):
