@@ -816,4 +816,3 @@ class TestUnregisteredLearnerCohortAssignments(TestCase):
 
         assert not was_retired
         assert self.cohort_assignment.email == known_learner_email
-
