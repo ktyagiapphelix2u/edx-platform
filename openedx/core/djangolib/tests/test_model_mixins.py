@@ -27,7 +27,10 @@ class TestDeletableByUserValue(TestCase):
 
         @classmethod
         def redact_before_delete_fields(cls):
-            return {'email': 'redacted-before-delete@safe.com'}
+            return {
+                'email': 'redacted-before-delete@safe.com',
+                'username': 'redacted-before-delete',
+            }
 
     def _make_queryset(self, exists):
         """
@@ -61,7 +64,13 @@ class TestDeletableByUserValue(TestCase):
 
     @ddt.data(
         ('NonRedactingModel', None),
-        ('RedactingModel', {'email': 'redacted-before-delete@safe.com'}),
+        (
+            'RedactingModel',
+            {
+                'email': 'redacted-before-delete@safe.com',
+                'username': 'redacted-before-delete',
+            },
+        ),
     )
     @ddt.unpack
     def test_delete_by_user_value(self, model_name, expected_redact_fields):
@@ -79,12 +88,13 @@ class TestDeletableByUserValue(TestCase):
             was_deleted = model_cls.delete_by_user_value(value='learner@example.com', field='email')
 
         assert was_deleted
-        assert mock_objects.filter.call_args_list == [
-            mock.call(email='learner@example.com'),
-            mock.call(id__in=[11, 12]),
-        ]
         if expected_redact_fields:
+            assert mock_objects.filter.call_args_list == [
+                mock.call(email='learner@example.com'),
+                mock.call(id__in=[11, 12]),
+            ]
             queryset.update.assert_called_once_with(**expected_redact_fields)
         else:
+            mock_objects.filter.assert_called_once_with(email='learner@example.com')
             queryset.update.assert_not_called()
         queryset.delete.assert_called_once_with()

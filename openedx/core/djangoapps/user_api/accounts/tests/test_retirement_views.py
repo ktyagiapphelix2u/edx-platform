@@ -1473,7 +1473,11 @@ class TestAccountRetirementPost(RetirementTestCase):
         with CaptureQueriesContext(connection) as ctx:
             self.post_and_assert_status(data)
 
-        assert_update_before_delete([q['sql'] for q in ctx], table=PendingEmailChange._meta.db_table)
+        assert_update_before_delete(
+            [q['sql'] for q in ctx],
+            table=PendingEmailChange._meta.db_table,
+            expected_redacted_value='redacted-before-delete@safe.com',
+        )
 
         self.test_user.refresh_from_db()
         self.test_user.profile.refresh_from_db()  # pylint: disable=no-member

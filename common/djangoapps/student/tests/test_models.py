@@ -611,7 +611,11 @@ class PendingEmailChangeTests(SharedModuleStoreTestCase):
         with CaptureQueriesContext(connection) as ctx:
             record_was_deleted = PendingEmailChange.delete_by_user_value(self.user, field='user')
 
-        assert_update_before_delete([q['sql'] for q in ctx], table=table)
+        assert_update_before_delete(
+            [q['sql'] for q in ctx],
+            table=table,
+            expected_redacted_value='redacted-before-delete@safe.com',
+        )
         assert record_was_deleted
         assert not PendingEmailChange.objects.filter(user=self.user).exists()
 
