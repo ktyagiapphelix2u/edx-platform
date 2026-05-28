@@ -644,7 +644,6 @@ class TestCourseEnrollmentAllowed(ModuleStoreTestCase):  # pylint: disable=missi
         assert_update_before_delete(
             [q['sql'] for q in ctx],
             table=CourseEnrollmentAllowed._meta.db_table,
-            require_id_filter=True,
             expected_redacted_value='redacted-before-delete@safe.com',
         )
         user_search_results = CourseEnrollmentAllowed.objects.filter(

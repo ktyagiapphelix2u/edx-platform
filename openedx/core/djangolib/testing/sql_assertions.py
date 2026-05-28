@@ -6,14 +6,12 @@ SQL assertion helpers for tests.
 def assert_update_before_delete(
     sql_list,
     table,
+    expected_redacted_value,
     num_redact_delete_pairs=1,
-    require_id_filter=False,
-    expected_redacted_value=None,
 ):
     """
-    Assert that UPDATE and DELETE queries for ``table`` occur in consecutive pairs.
-
-    Optionally assert ID-based filtering and an expected redacted value in UPDATE SQL.
+    Assert that UPDATE and DELETE queries for ``table`` occur in consecutive pairs,
+    and that each UPDATE contains the expected redacted value.
     """
     table_key = table.upper()
     expected_sql_list = [
@@ -31,16 +29,6 @@ def assert_update_before_delete(
         delete_sql = expected_sql_list[index + 1]
         assert 'UPDATE' in update_sql.upper(), f'Expected UPDATE at position {index} for {table}'
         assert 'DELETE' in delete_sql.upper(), f'Expected DELETE at position {index + 1} for {table}'
-
-        if require_id_filter:
-            assert '"ID" IN' in update_sql.upper() or 'WHERE "ID"' in update_sql.upper(), (
-                f'Expected UPDATE to use ID-based filtering for {table}'
-            )
-            assert '"ID" IN' in delete_sql.upper() or 'WHERE "ID"' in delete_sql.upper(), (
-                f'Expected DELETE to use ID-based filtering for {table}'
-            )
-
-        if expected_redacted_value is not None:
-            assert expected_redacted_value.upper() in update_sql.upper(), (
-                f'Expected UPDATE to set redacted value {expected_redacted_value} for {table}'
-            )
+        assert expected_redacted_value.upper() in update_sql.upper(), (
+            f'Expected UPDATE to set redacted value {expected_redacted_value} for {table}'
+        )

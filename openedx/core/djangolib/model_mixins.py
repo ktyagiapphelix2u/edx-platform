@@ -52,12 +52,17 @@ class DeletableByUserValue:
 
         redact_fields = cls.redact_before_delete_fields()
         if redact_fields:
-            # When redacting the field used for filtering, switch to ID-based
-            # operations so the subsequent delete still targets the same rows.
-            record_ids = list(records_matching_user_value.values_list('id', flat=True))
-            records_matching_ids = cls.objects.filter(id__in=record_ids)
-            records_matching_ids.update(**redact_fields)
-            records_matching_ids.delete()
+            if field in redact_fields:
+                # The filter field itself is being redacted, so after the UPDATE
+                # the original WHERE clause would no longer match. Capture IDs
+                # first so the DELETE targets the same rows.
+                record_ids = list(records_matching_user_value.values_list('id', flat=True))
+                records_matching_ids = cls.objects.filter(id__in=record_ids)
+                records_matching_ids.update(**redact_fields)
+                records_matching_ids.delete()
+            else:
+                records_matching_user_value.update(**redact_fields)
+                records_matching_user_value.delete()
         else:
             records_matching_user_value.delete()
         return True

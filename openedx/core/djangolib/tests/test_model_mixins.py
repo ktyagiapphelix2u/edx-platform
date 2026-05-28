@@ -62,39 +62,50 @@ class TestDeletableByUserValue(TestCase):
         queryset.update.assert_not_called()
         queryset.delete.assert_not_called()
 
+    _REDACT_FIELDS = {
+        'email': 'redacted-before-delete@safe.com',
+        'username': 'redacted-before-delete',
+    }
+
     @ddt.data(
-        ('NonRedactingModel', None),
-        (
-            'RedactingModel',
-            {
-                'email': 'redacted-before-delete@safe.com',
-                'username': 'redacted-before-delete',
-            },
-        ),
+        # No redaction: delete directly on the original queryset.
+        ('NonRedactingModel', 'email', None, False),
+        # Filter field IS in redact_fields: must use ID-based path so the DELETE
+        # still targets the same rows after the UPDATE changes the filter field.
+        ('RedactingModel', 'email', _REDACT_FIELDS, True),
+        # Filter field is NOT in redact_fields: simple update+delete on the
+        # original queryset works fine (filter field is unchanged by the UPDATE).
+        ('RedactingModel', 'user', _REDACT_FIELDS, False),
     )
     @ddt.unpack
-    def test_delete_by_user_value(self, model_name, expected_redact_fields):
+    def test_delete_by_user_value(self, model_name, field, expected_redact_fields, uses_id_based_lookup):
         """
         Verify delete behavior with and without redaction configured.
 
         When no redaction hook is set, rows are deleted directly.
-        When a redaction hook is set, fields are updated before deletion.
+        When the filter field is also being redacted, IDs are captured first so
+        the DELETE targets the same rows after the UPDATE changes the filter value.
+        When redaction fields do not include the filter field, the original
+        queryset is used for both update and delete.
         """
         model_cls = getattr(self, model_name)
         queryset = self._make_queryset(exists=True)
         with mock.patch.object(model_cls, 'objects', create=True) as mock_objects:
             mock_objects.filter.return_value = queryset
 
-            was_deleted = model_cls.delete_by_user_value(value='learner@example.com', field='email')
+            was_deleted = model_cls.delete_by_user_value(value='learner@example.com', field=field)
 
         assert was_deleted
-        if expected_redact_fields:
+        if uses_id_based_lookup:
             assert mock_objects.filter.call_args_list == [
-                mock.call(email='learner@example.com'),
+                mock.call(**{field: 'learner@example.com'}),
                 mock.call(id__in=[11, 12]),
             ]
             queryset.update.assert_called_once_with(**expected_redact_fields)
+        elif expected_redact_fields:
+            mock_objects.filter.assert_called_once_with(**{field: 'learner@example.com'})
+            queryset.update.assert_called_once_with(**expected_redact_fields)
         else:
-            mock_objects.filter.assert_called_once_with(email='learner@example.com')
+            mock_objects.filter.assert_called_once_with(**{field: 'learner@example.com'})
             queryset.update.assert_not_called()
         queryset.delete.assert_called_once_with()
