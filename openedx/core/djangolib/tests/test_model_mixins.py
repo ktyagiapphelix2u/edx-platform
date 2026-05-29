@@ -2,10 +2,11 @@
 Tests for model_mixins.py.
 """
 
-import ddt
-from django.test import TestCase
+from unittest import TestCase, mock
 
-from openedx.core.djangolib.tests.models import NonRedactingModel, RedactingModel
+import ddt
+
+from openedx.core.djangolib.model_mixins import DeletableByUserValue
 
 
 @ddt.ddt
@@ -14,53 +15,76 @@ class TestDeletableByUserValue(TestCase):
     Unit tests for DeletableByUserValue.
     """
 
+    class NonRedactingModel(DeletableByUserValue):
+        """
+        Dummy model that uses default redaction behavior.
+        """
+
+    class RedactingModel(DeletableByUserValue):
+        """
+        Dummy model that overrides redaction fields.
+        """
+
+        @classmethod
+        def redact_before_delete_fields(cls):
+            return {'email': 'redacted@retired.invalid'}
+
+    def _make_queryset(self, exists):
+        """
+        Return a mock queryset with ``exists`` and ``values_list`` pre-configured.
+        """
+        queryset = mock.Mock()
+        queryset.exists.return_value = exists
+        queryset.values_list.return_value = [11, 12]
+        return queryset
+
     def test_redact_before_delete_fields_defaults_to_empty_dict(self):
         """
-        Verify the default redaction hook returns an empty dict.
+        Verify the default redaction hook does not request any field updates.
         """
-        assert not NonRedactingModel.redact_before_delete_fields()
+        assert not self.NonRedactingModel.redact_before_delete_fields()
 
-    def test_delete_by_user_value_returns_false_when_no_matches(self):
+    @mock.patch.object(NonRedactingModel, 'objects', create=True)
+    def test_delete_by_user_value_returns_false_when_no_matches(self, mock_objects):
         """
-        Verify no deletes occur when no rows match the filter.
+        Verify no updates or deletes occur when no rows match the filter.
         """
-        was_deleted = NonRedactingModel.delete_by_user_value(value=999, field='user_id')
+        queryset = self._make_queryset(exists=False)
+        mock_objects.filter.return_value = queryset
+
+        was_deleted = self.NonRedactingModel.delete_by_user_value(value='missing@example.com', field='email')
 
         assert not was_deleted
-        assert NonRedactingModel.objects.count() == 0
-
-    def test_delete_by_user_value_non_redacting(self):
-        """
-        Verify delete works without redaction — rows are simply deleted.
-        """
-        NonRedactingModel.objects.create(user_id=1)
-        NonRedactingModel.objects.create(user_id=1)
-        NonRedactingModel.objects.create(user_id=2)
-
-        was_deleted = NonRedactingModel.delete_by_user_value(value=1, field='user_id')
-
-        assert was_deleted
-        assert NonRedactingModel.objects.count() == 1
-        assert NonRedactingModel.objects.first().user_id == 2
+        mock_objects.filter.assert_called_once_with(email='missing@example.com')
+        queryset.update.assert_not_called()
+        queryset.delete.assert_not_called()
 
     @ddt.data(
-        ('email', 'learner@example.com'),
-        ('user', 'learner_user'),
+        ('NonRedactingModel', None),
+        ('RedactingModel', {'email': 'redacted@retired.invalid'}),
     )
     @ddt.unpack
-    def test_delete_by_user_value_redacting(self, field, filter_value):
+    def test_delete_by_user_value(self, model_name, expected_redact_fields):
         """
-        Verify matching rows are redacted and deleted; unrelated rows remain.
-        """
-        RedactingModel.objects.create(email='learner@example.com', username='learner', user='learner_user')
-        RedactingModel.objects.create(email='learner@example.com', username='learner2', user='learner_user')
-        RedactingModel.objects.create(email='other@example.com', username='other', user='other_user')
+        Verify delete behavior with and without redaction configured.
 
-        was_deleted = RedactingModel.delete_by_user_value(value=filter_value, field=field)
+        When no redaction hook is set, rows are deleted directly.
+        When a redaction hook is set, fields are updated before deletion.
+        """
+        model_cls = getattr(self, model_name)
+        queryset = self._make_queryset(exists=True)
+        with mock.patch.object(model_cls, 'objects', create=True) as mock_objects:
+            mock_objects.filter.return_value = queryset
+
+            was_deleted = model_cls.delete_by_user_value(value='learner@example.com', field='email')
 
         assert was_deleted
-        assert RedactingModel.objects.count() == 1
-        remaining = RedactingModel.objects.first()
-        assert remaining.email == 'other@example.com'
-        assert remaining.username == 'other'
-
+        assert mock_objects.filter.call_args_list == [
+            mock.call(email='learner@example.com'),
+            mock.call(id__in=[11, 12]),
+        ]
+        if expected_redact_fields:
+            queryset.update.assert_called_once_with(**expected_redact_fields)
+        else:
+            queryset.update.assert_not_called()
+        queryset.delete.assert_called_once_with()
