@@ -35,7 +35,7 @@ class TestDeletableByUserValue(TestCase):
         """
         queryset = mock.Mock()
         queryset.exists.return_value = exists
-        queryset.values_list.return_value = [11, 12]
+        queryset.values_list.return_value = [11, 12] if exists else []
         return queryset
 
     def test_redact_before_delete_fields_defaults_to_empty_dict(self):
@@ -44,15 +44,15 @@ class TestDeletableByUserValue(TestCase):
         """
         assert not self.NonRedactingModel.redact_before_delete_fields()
 
-    @mock.patch.object(NonRedactingModel, 'objects', create=True)
-    def test_delete_by_user_value_returns_false_when_no_matches(self, mock_objects):
+    def test_delete_by_user_value_returns_false_when_no_matches(self):
         """
         Verify no updates or deletes occur when no rows match the filter.
         """
         queryset = self._make_queryset(exists=False)
-        mock_objects.filter.return_value = queryset
+        with mock.patch.object(self.NonRedactingModel, 'objects', create=True) as mock_objects:
+            mock_objects.filter.return_value = queryset
 
-        was_deleted = self.NonRedactingModel.delete_by_user_value(value='missing@example.com', field='email')
+            was_deleted = self.NonRedactingModel.delete_by_user_value(value='missing@example.com', field='email')
 
         assert not was_deleted
         mock_objects.filter.assert_called_once_with(email='missing@example.com')
