@@ -45,24 +45,13 @@ class DeletableByUserValue:
         Returns False otherwise.
         """
         filter_kwargs = {field: value}
-        records_matching_user_value = cls.objects.filter(**filter_kwargs)
-
-        if not records_matching_user_value.exists():
+        record_ids = list(cls.objects.filter(**filter_kwargs).values_list('id', flat=True))
+        if not record_ids:
             return False
 
+        queryset_to_delete = cls.objects.filter(id__in=record_ids)
         redact_fields = cls.redact_before_delete_fields()
         if redact_fields:
-            if field in redact_fields:
-                # The filter field itself is being redacted, so after the UPDATE
-                # the original WHERE clause would no longer match. Capture IDs
-                # first so the DELETE targets the same rows.
-                record_ids = list(records_matching_user_value.values_list('id', flat=True))
-                records_matching_ids = cls.objects.filter(id__in=record_ids)
-                records_matching_ids.update(**redact_fields)
-                records_matching_ids.delete()
-            else:
-                records_matching_user_value.update(**redact_fields)
-                records_matching_user_value.delete()
-        else:
-            records_matching_user_value.delete()
+            queryset_to_delete.update(**redact_fields)
+        queryset_to_delete.delete()
         return True

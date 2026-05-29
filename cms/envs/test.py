@@ -164,6 +164,7 @@ ENABLE_TEAMS = True
 INSTALLED_APPS += [  # noqa: F405
     "openedx.core.djangoapps.ccxcon.apps.CCXConnectorConfig",
     "common.djangoapps.third_party_auth.apps.ThirdPartyAuthConfig",
+    "openedx.core.djangolib.tests",
 ]
 
 ########################## VIDEO IMAGE STORAGE ############################

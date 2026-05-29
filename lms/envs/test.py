@@ -275,6 +275,7 @@ FACEBOOK_API_VERSION = "v2.8"
 
 ######### custom courses #########
 INSTALLED_APPS += ['lms.djangoapps.ccx', 'openedx.core.djangoapps.ccxcon.apps.CCXConnectorConfig']  # noqa: F405
+INSTALLED_APPS += ['openedx.core.djangolib.tests']  # noqa: F405
 
 # Set dummy values for profile image settings.
 PROFILE_IMAGE_BACKEND = {
