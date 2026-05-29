@@ -7,9 +7,22 @@ from django.db import models
 from openedx.core.djangolib.model_mixins import DeletableByUserValue
 
 
-class DeletableByUserValueTestModel(DeletableByUserValue, models.Model):
+class NonRedactingModel(DeletableByUserValue, models.Model):
     """
-    Test model that uses DeletableByUserValue with redaction.
+    Model that uses default (empty) redaction behavior.
+    """
+    user_id = models.IntegerField()
+
+    class Meta:
+        app_label = 'djangolib_tests'
+
+    def __str__(self):
+        return str(self.user_id)
+
+
+class RedactingModel(DeletableByUserValue, models.Model):
+    """
+    Model that overrides redaction fields.
     """
     email = models.CharField(max_length=255)
     username = models.CharField(max_length=255)
