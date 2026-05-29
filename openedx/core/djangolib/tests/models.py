@@ -18,6 +18,9 @@ class DeletableByUserValueTestModel(DeletableByUserValue, models.Model):
     class Meta:
         app_label = 'djangolib_tests'
 
+    def __str__(self):
+        return self.email
+
     @classmethod
     def redact_before_delete_fields(cls):
         return {
