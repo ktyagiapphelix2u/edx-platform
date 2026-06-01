@@ -33,7 +33,7 @@ class DeletableByUserValue:
     @classmethod
     def delete_by_user_value(cls, value, field):
         """
-        Optionally redacts and always deletes instances of this model where ``field`` equals ``value``.
+        Redacts as-needed and always deletes instances of this model where ``field`` equals ``value``.
 
         e.g.
             ``delete_by_user_value(value='learner@example.com', field='email')``
