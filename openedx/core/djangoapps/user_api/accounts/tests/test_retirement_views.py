@@ -67,8 +67,7 @@ from openedx.core.djangoapps.user_api.models import (
     UserRetirementPartnerReportingStatus,
     UserRetirementStatus,
 )
-from openedx.core.djangolib.testing.sql_assertions import assert_update_before_delete
-from openedx.core.djangolib.testing.utils import skip_unless_lms
+from openedx.core.djangolib.testing.utils import assert_redact_before_delete, skip_unless_lms
 from xmodule.modulestore.tests.django_utils import ModuleStoreTestCase
 from xmodule.modulestore.tests.factories import CourseFactory
 
@@ -1473,10 +1472,10 @@ class TestAccountRetirementPost(RetirementTestCase):
         with CaptureQueriesContext(connection) as ctx:
             self.post_and_assert_status(data)
 
-        assert_update_before_delete(
+        assert_redact_before_delete(
             [q['sql'] for q in ctx],
             table=PendingEmailChange._meta.db_table,
-            expected_redacted_value='redacted-before-delete@safe.com',
+            expected_redacted_value_list=['redacted-before-delete@safe.com'],
         )
 
         self.test_user.refresh_from_db()
