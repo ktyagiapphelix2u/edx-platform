@@ -1597,7 +1597,7 @@ class CourseEnrollmentAllowed(DeletableByUserValue, models.Model):
     the object is marked with the student who enrolled, to prevent students from changing e-mails and
     enrolling many accounts through the same e-mail.
 
-    .. pii: The email field stores PII.
+    .. pii: Contains email, redacted then deleted in AccountRetirementView
     .. pii_types: email_address
     .. pii_retirement: local_api
     """
