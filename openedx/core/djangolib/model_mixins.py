@@ -33,13 +33,13 @@ class DeletableByUserValue:
     @classmethod
     def delete_by_user_value(cls, value, field):
         """
-        Redacts and deletes instances of this model where ``field`` equals ``value``.
+        Optionally redacts and always deletes instances of this model where ``field`` equals ``value``.
 
         e.g.
             ``delete_by_user_value(value='learner@example.com', field='email')``
 
-        If ``redact_before_delete_fields`` returns a non-empty dict, matching
-        records are bulk-updated with those redacted values before delete.
+        If ``redact_before_delete_fields()`` returns a non-empty dict, the
+        returned PII fields are redacted before any records are deleted.
 
         Returns True if any instances were deleted.
         Returns False otherwise.
