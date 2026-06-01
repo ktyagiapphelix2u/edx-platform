@@ -44,8 +44,7 @@ from openedx.core.djangoapps.content.course_overviews.models import CourseOvervi
 from openedx.core.djangoapps.content.course_overviews.tests.factories import CourseOverviewFactory
 from openedx.core.djangoapps.schedules.models import Schedule
 from openedx.core.djangoapps.user_api.preferences.api import set_user_preference
-from openedx.core.djangolib.testing.sql_assertions import assert_update_before_delete
-from openedx.core.djangolib.testing.utils import skip_unless_lms
+from openedx.core.djangolib.testing.utils import assert_redact_before_delete, skip_unless_lms
 from xmodule.modulestore import ModuleStoreEnum  # pylint: disable=wrong-import-order
 from xmodule.modulestore.tests.django_utils import (  # pylint: disable=wrong-import-order
     ModuleStoreTestCase,
@@ -611,10 +610,10 @@ class PendingEmailChangeTests(SharedModuleStoreTestCase):
         with CaptureQueriesContext(connection) as ctx:
             record_was_deleted = PendingEmailChange.delete_by_user_value(self.user, field='user')
 
-        assert_update_before_delete(
+        assert_redact_before_delete(
             [q['sql'] for q in ctx],
             table=table,
-            expected_redacted_value='redacted-before-delete@safe.com',
+            expected_redacted_value_list=['redacted-before-delete@safe.com'],
         )
         assert record_was_deleted
         assert not PendingEmailChange.objects.filter(user=self.user).exists()
@@ -641,10 +640,10 @@ class TestCourseEnrollmentAllowed(ModuleStoreTestCase):  # pylint: disable=missi
             )
 
         assert is_successful
-        assert_update_before_delete(
+        assert_redact_before_delete(
             [q['sql'] for q in ctx],
             table=CourseEnrollmentAllowed._meta.db_table,
-            expected_redacted_value='redacted-before-delete@safe.com',
+            expected_redacted_value_list=['redacted-before-delete@safe.com'],
         )
         user_search_results = CourseEnrollmentAllowed.objects.filter(
             email=self.email

@@ -18,7 +18,7 @@ from openedx_events.testing import OpenEdxEventsTestMixin
 
 from common.djangoapps.student.models import CourseEnrollment
 from common.djangoapps.student.tests.factories import UserFactory
-from openedx.core.djangolib.testing.sql_assertions import assert_update_before_delete
+from openedx.core.djangolib.testing.utils import assert_redact_before_delete
 from xmodule.modulestore.django import modulestore  # pylint: disable=wrong-import-order
 from xmodule.modulestore.tests.django_utils import (  # pylint: disable=wrong-import-order
     TEST_DATA_SPLIT_MODULESTORE,
@@ -794,10 +794,10 @@ class TestUnregisteredLearnerCohortAssignments(TestCase):
             )
 
         assert was_retired
-        assert_update_before_delete(
+        assert_redact_before_delete(
             [q['sql'] for q in ctx],
             table=UnregisteredLearnerCohortAssignments._meta.db_table,
-            expected_redacted_value='redacted-before-delete@safe.com',
+            expected_redacted_value_list=['redacted-before-delete@safe.com'],
         )
 
         search_retired_user_results = \
