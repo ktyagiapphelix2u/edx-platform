@@ -12,7 +12,7 @@ from django.contrib.auth.models import AnonymousUser, User  # pylint: disable=im
 from django.core.cache import cache
 from django.db import connection
 from django.db.models.functions import Lower
-from django.test import TestCase, override_settings
+from django.test import override_settings, TestCase
 from django.test.utils import CaptureQueriesContext
 from edx_toggles.toggles.testutils import override_waffle_flag
 from freezegun import freeze_time
@@ -27,8 +27,10 @@ from common.djangoapps.student.models import (
     CourseEnrollment,
     CourseEnrollmentAllowed,
     ManualEnrollmentAudit,
+    PENDING_SECONDARY_EMAIL_REDACTED_VALUE,
     PendingEmailChange,
     PendingNameChange,
+    PendingSecondaryEmailChange,
     UserAttribute,
     UserCelebration,
     UserProfile,
@@ -758,18 +760,65 @@ class TestAccountRecovery(TestCase):
 
     def test_retire_recovery_email(self):
         """
-        Assert that Account Record for a given user is deleted when `retire_recovery_email` is called
+        Assert that AccountRecovery secondary_email is redacted before the record is deleted.
         """
-        # Create user and associated recovery email record
         user = UserFactory()
-        AccountRecoveryFactory(user=user)
+        AccountRecoveryFactory(user=user, secondary_email='recovery@example.com')
         assert len(AccountRecovery.objects.filter(user_id=user.id)) == 1
 
-        # Retire recovery email
-        AccountRecovery.retire_recovery_email(user_id=user.id)
+        with CaptureQueriesContext(connection) as ctx:
+            AccountRecovery.retire_recovery_email(user_id=user.id)
 
-        # Assert that there is no longer an AccountRecovery record for this user
+        assert_redact_before_delete(
+            [q['sql'] for q in ctx],
+            table=AccountRecovery._meta.db_table,
+            expected_redacted_value_list=[f'redact-before-delete+{user.id}@redacted.com'],
+        )
+
         assert len(AccountRecovery.objects.filter(user_id=user.id)) == 0
+
+    def test_retire_recovery_email_when_no_record(self):
+        """
+        Assert retirement cleanup returns False when no account recovery row exists.
+        """
+        user = UserFactory()
+        assert AccountRecovery.retire_recovery_email(user_id=user.id) is False
+
+
+class TestPendingSecondaryEmailChange(TestCase):
+    """
+    Tests for retiring PendingSecondaryEmailChange records.
+    """
+
+    def test_redact_and_delete_pending_secondary_email(self):
+        """
+        Assert that the pending secondary email is redacted before the record is deleted.
+        """
+        user = UserFactory()
+        PendingSecondaryEmailChange.objects.create(
+            user=user,
+            new_secondary_email='new-secondary@example.com',
+            activation_key='a' * 32,
+        )
+        assert len(PendingSecondaryEmailChange.objects.filter(user_id=user.id)) == 1
+
+        with CaptureQueriesContext(connection) as ctx:
+            PendingSecondaryEmailChange.redact_and_delete_pending_secondary_email(user_id=user.id)
+
+        assert_redact_before_delete(
+            [query['sql'] for query in ctx],
+            table=PendingSecondaryEmailChange._meta.db_table,
+            expected_redacted_value_list=[PENDING_SECONDARY_EMAIL_REDACTED_VALUE],
+        )
+
+        assert len(PendingSecondaryEmailChange.objects.filter(user_id=user.id)) == 0
+
+    def test_redact_and_delete_pending_secondary_email_when_no_record(self):
+        """
+        Assert retirement cleanup returns False when no pending secondary row exists.
+        """
+        user = UserFactory()
+        assert PendingSecondaryEmailChange.redact_and_delete_pending_secondary_email(user_id=user.id) is False
 
 
 @ddt.ddt
