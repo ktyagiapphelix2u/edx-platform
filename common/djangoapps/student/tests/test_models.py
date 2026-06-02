@@ -12,7 +12,7 @@ from django.contrib.auth.models import AnonymousUser, User  # pylint: disable=im
 from django.core.cache import cache
 from django.db import connection
 from django.db.models.functions import Lower
-from django.test import override_settings, TestCase
+from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from edx_toggles.toggles.testutils import override_waffle_flag
 from freezegun import freeze_time
@@ -23,11 +23,11 @@ from common.djangoapps.course_modes.tests.factories import CourseModeFactory
 from common.djangoapps.student.models import (
     ALLOWEDTOENROLL_TO_ENROLLED,
     IS_MARKETABLE,
+    PENDING_SECONDARY_EMAIL_REDACTED_VALUE,
     AccountRecovery,
     CourseEnrollment,
     CourseEnrollmentAllowed,
     ManualEnrollmentAudit,
-    PENDING_SECONDARY_EMAIL_REDACTED_VALUE,
     PendingEmailChange,
     PendingNameChange,
     PendingSecondaryEmailChange,
