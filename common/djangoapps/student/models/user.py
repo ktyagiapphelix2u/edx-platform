@@ -1754,7 +1754,7 @@ class AccountRecovery(models.Model):  # noqa: DJ008
     @classmethod
     def retire_recovery_email(cls, user_id):
         """
-        Redact and delete user's recovery/secondary email as part of GDPR Phase I.
+        Redact and delete user's recovery/secondary email.
 
         If an AccountRecovery record is found for this user it will be redacted and
         deleted. If it is not found it is assumed this table has no PII for the given user.
