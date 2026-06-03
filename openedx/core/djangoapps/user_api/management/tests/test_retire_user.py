@@ -136,8 +136,10 @@ def test_retire_with_username_email_userfile(setup_retirement_states):  # pylint
 
 
 @skip_unless_lms
-@mock.patch('openedx.core.djangoapps.user_api.management.commands.retire_user.create_retirement_request_and_deactivate_account')
-def test_retire_user_calls_shared_deactivate_helper(mock_create_retirement_request_and_deactivate_account, setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument  # noqa: F811
+@mock.patch(
+    'openedx.core.djangoapps.user_api.management.commands.retire_user.create_retirement_request_and_deactivate_account'
+)
+def test_retire_user_calls_shared_deactivate_helper(mock_deactivate_helper, setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument  # noqa: F811
     """
     Verify the command delegates retirement side effects to the shared helper.
     """
@@ -145,7 +147,7 @@ def test_retire_user_calls_shared_deactivate_helper(mock_create_retirement_reque
 
     call_command('retire_user', username=user.username, user_email=user.email)
 
-    mock_create_retirement_request_and_deactivate_account.assert_called_once_with(user)
+    mock_deactivate_helper.assert_called_once_with(user)
 
 
 @pytest.mark.parametrize('social_auth_configs', [

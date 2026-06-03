@@ -7,7 +7,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from ...accounts.utils import create_retirement_request_and_deactivate_account
-from ...models import BulkUserRetirementConfig, UserRetirementStatus
+from ...models import BulkUserRetirementConfig
 
 logger = logging.getLogger(__name__)
 
