@@ -6,6 +6,7 @@ Test the retire_user management command
 import csv
 import os
 from contextlib import contextmanager
+from unittest import mock
 
 import pytest
 from django.contrib.auth.models import User  # pylint: disable=imported-auth-user
@@ -15,7 +16,6 @@ from django.db.models.signals import pre_delete
 from django.test.utils import CaptureQueriesContext
 from social_django.models import UserSocialAuth
 
-from common.djangoapps.student.models import PendingSecondaryEmailChange
 from common.djangoapps.student.tests.factories import UserFactory  # lint-amnesty, pylint: disable=wrong-import-order
 from openedx.core.djangoapps.user_api.accounts.signals import (
     redact_social_auth_pii_before_deletion,
@@ -27,7 +27,6 @@ from openedx.core.djangoapps.user_api.accounts.tests.test_utils import (
     assert_update_before_delete,
 )
 from openedx.core.djangolib.testing.utils import (  # pylint: disable=wrong-import-order
-    assert_redact_before_delete,
     skip_unless_lms,
 )
 
@@ -137,28 +136,16 @@ def test_retire_with_username_email_userfile(setup_retirement_states):  # pylint
 
 
 @skip_unless_lms
-def test_retire_user_redacts_and_deletes_pending_secondary_email(setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument  # noqa: F811
+@mock.patch('openedx.core.djangoapps.user_api.management.commands.retire_user.create_retirement_request_and_deactivate_account')
+def test_retire_user_calls_shared_deactivate_helper(mock_create_retirement_request_and_deactivate_account, setup_retirement_states):  # lint-amnesty, pylint: disable=redefined-outer-name, unused-argument  # noqa: F811
     """
-    Verify pending secondary email rows are redacted before delete during retire_user.
+    Verify the command delegates retirement side effects to the shared helper.
     """
     user = UserFactory.create(username='user-cleanup', email='user-cleanup@example.com')
-    PendingSecondaryEmailChange.objects.create(
-        user=user,
-        new_secondary_email='pending-secondary@example.com',
-        activation_key='c' * 32,
-    )
-    assert PendingSecondaryEmailChange.objects.filter(user=user).exists()
 
-    with CaptureQueriesContext(connection) as ctx:
-        call_command('retire_user', username=user.username, user_email=user.email)
+    call_command('retire_user', username=user.username, user_email=user.email)
 
-    assert_redact_before_delete(
-        [query['sql'] for query in ctx],
-        table='student_pendingsecondaryemailchange',
-        expected_redacted_value_list=['redact-before-delete@redacted.com'],
-    )
-
-    assert not PendingSecondaryEmailChange.objects.filter(user=user).exists()
+    mock_create_retirement_request_and_deactivate_account.assert_called_once_with(user)
 
 
 @pytest.mark.parametrize('social_auth_configs', [

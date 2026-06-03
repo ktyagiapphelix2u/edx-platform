@@ -19,6 +19,7 @@ from social_django.models import UserSocialAuth
 
 from common.djangoapps.student.models import (
     AccountRecovery,
+    PendingEmailChange,
     PendingSecondaryEmailChange,
     Registration,
     get_retired_email_by_email,
@@ -254,6 +255,9 @@ def create_retirement_request_and_deactivate_account(user):
     # Delete OAuth tokens associated with the user.
     retire_dot_oauth2_models(user)
     AccountRecovery.retire_recovery_email(user.id)
+
+    # Delete any pending account changes for added safety around account lock-out.
+    PendingEmailChange.delete_by_user_value(user, field='user')
     PendingSecondaryEmailChange.redact_and_delete_pending_secondary_email(user.id)
 
 
