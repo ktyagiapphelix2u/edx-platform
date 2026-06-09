@@ -195,7 +195,7 @@ class TestDeactivateLogout(RetirementTestCase):
     def test_user_can_deactivate_self(self, mock_retire_dot):
         """
         Verify a user calling the deactivation endpoint logs out the user,
-        retires credentials, and creates a user retirement row.
+        redacts user account record, and creates a user retirement row.
         """
         self.client.login(username=self.test_user.username, password=self.test_password)
         headers = build_jwt_headers(self.test_user)
