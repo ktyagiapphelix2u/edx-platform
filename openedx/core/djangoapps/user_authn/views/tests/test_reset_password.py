@@ -35,6 +35,7 @@ from common.djangoapps.util.testing import EventTestMixin
 from openedx.core.djangoapps.oauth_dispatch.tests import factories as dot_factories
 from openedx.core.djangoapps.site_configuration import helpers as configuration_helpers
 from openedx.core.djangoapps.user_api.accounts import EMAIL_MAX_LENGTH, EMAIL_MIN_LENGTH
+from openedx.core.djangoapps.user_api.accounts.utils import create_retirement_request_and_deactivate_account
 from openedx.core.djangoapps.user_api.models import UserRetirementRequest
 from openedx.core.djangoapps.user_api.tests.test_views import UserAPITestCase
 from openedx.core.djangoapps.user_authn.views.password_reset import (
@@ -553,6 +554,40 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
         # the user is not marked as active.
         assert resp.status_code == 200
         assert not User.objects.get(pk=self.user.pk).is_active
+
+    def test_password_reset_retired_user_initiation_fail(self):
+        """
+        Tests that a retired user cannot initiate a password reset.
+        """
+        create_retirement_request_and_deactivate_account(self.user)
+        retired_user = User.objects.get(pk=self.user.pk)
+
+        reset_request = self.request_factory.post('/password_reset/', {'email': retired_user.email})
+        reset_request.user = AnonymousUser()
+        response = password_reset(reset_request)
+
+        # We intentionally return a generic success response, but no reset email should be sent.
+        assert response.status_code == 200
+        response_data = json.loads(response.content.decode('utf-8'))
+        assert response_data['success'] is True
+        assert len(mail.outbox) == 0
+
+    def test_password_reset_retired_user_complete_fail(self):
+        """
+        Tests that a retired user cannot complete password reset even with a submitted form.
+        """
+        create_retirement_request_and_deactivate_account(self.user)
+        retired_user = User.objects.get(pk=self.user.pk)
+
+        request_params = {'new_password1': 'new_password1', 'new_password2': 'new_password1'}
+        confirm_request = self.request_factory.post(self.password_reset_confirm_url, data=request_params)
+        self.setup_request_session_with_token(confirm_request)
+        confirm_request.user = retired_user
+
+        response = PasswordResetConfirmWrapper.as_view()(confirm_request, uidb36=self.uidb36, token=self.token)
+
+        assert response.status_code == 200
+        assert not User.objects.get(pk=self.user.pk).has_usable_password()
 
     def test_password_reset_normalize_password(self):
         # pylint: disable=anomalous-unicode-escape-in-string
