@@ -568,9 +568,11 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
         Tests that a retired user cannot initiate a password reset.
         """
         create_retirement_request_and_deactivate_account(self.user)
-        retired_user = User.objects.get(pk=self.user.pk)
+        self.user.refresh_from_db()
+        assert not self.user.is_active
+        assert not self.user.has_usable_password()
 
-        reset_request = self.request_factory.post('/password_reset/', {'email': retired_user.email})
+        reset_request = self.request_factory.post('/password_reset/', {'email': self.user.email})
         reset_request.user = AnonymousUser()
         response = password_reset(reset_request)
 
@@ -585,17 +587,21 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
         Tests that a retired user cannot complete password reset even with a submitted form.
         """
         create_retirement_request_and_deactivate_account(self.user)
-        retired_user = User.objects.get(pk=self.user.pk)
+        self.user.refresh_from_db()
+        assert not self.user.is_active
+        old_password_hash = self.user.password
 
         request_params = {'new_password1': 'new_password1', 'new_password2': 'new_password1'}
         confirm_request = self.request_factory.post(self.password_reset_confirm_url, data=request_params)
         self.setup_request_session_with_token(confirm_request)
-        confirm_request.user = retired_user
+        confirm_request.user = self.user
 
         response = PasswordResetConfirmWrapper.as_view()(confirm_request, uidb36=self.uidb36, token=self.token)
 
         assert response.status_code == 200
-        assert not User.objects.get(pk=self.user.pk).has_usable_password()
+        self.user.refresh_from_db()
+        assert not self.user.has_usable_password()
+        assert self.user.password == old_password_hash
 
     def test_password_reset_normalize_password(self):
         # pylint: disable=anomalous-unicode-escape-in-string
