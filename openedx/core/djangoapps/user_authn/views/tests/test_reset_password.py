@@ -80,6 +80,14 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
         self.user_bad_passwd.password = UNUSABLE_PASSWORD_PREFIX
         self.user_bad_passwd.save()
 
+        # Create PENDING retirement state for tests that need it
+        RetirementState.objects.create(
+            state_name='PENDING',
+            state_execution_order=1,
+            is_dead_end_state=False,
+            required=True,
+        )
+
     def setup_request_session_with_token(self, request):
         """
         Internal helper to setup request session and add token in session.
@@ -559,12 +567,6 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
         """
         Tests that a retired user cannot initiate a password reset.
         """
-        RetirementState.objects.create(
-            state_name='PENDING',
-            state_execution_order=1,
-            is_dead_end_state=False,
-            required=True,
-        )
         create_retirement_request_and_deactivate_account(self.user)
         retired_user = User.objects.get(pk=self.user.pk)
 
@@ -582,12 +584,6 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
         """
         Tests that a retired user cannot complete password reset even with a submitted form.
         """
-        RetirementState.objects.create(
-            state_name='PENDING',
-            state_execution_order=1,
-            is_dead_end_state=False,
-            required=True,
-        )
         create_retirement_request_and_deactivate_account(self.user)
         retired_user = User.objects.get(pk=self.user.pk)
 
