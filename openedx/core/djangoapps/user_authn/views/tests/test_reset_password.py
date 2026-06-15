@@ -602,6 +602,7 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
         # Security design: always return 200 OK to avoid user enumeration,
         # but ensure the password remains unchanged and unusable.
         assert response.status_code == 200
+        self.user.refresh_from_db()
         assert not self.user.has_usable_password()
         assert self.user.password == old_password_hash
 
