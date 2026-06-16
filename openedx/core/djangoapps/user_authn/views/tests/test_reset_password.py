@@ -576,8 +576,7 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
         reset_request.user = AnonymousUser()
         response = password_reset(reset_request)
 
-        # Security design: always return 200 OK to avoid user enumeration,
-        # but ensure no reset email is sent and the password remains unchanged.
+        # Always return 200 OK to prevent user enumeration while leaving the password unchanged and unusable.
         assert response.status_code == 200
         response_data = json.loads(response.content.decode('utf-8'))
         assert response_data['success'] is True
@@ -599,8 +598,7 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
 
         response = PasswordResetConfirmWrapper.as_view()(confirm_request, uidb36=self.uidb36, token=self.token)
 
-        # Security design: always return 200 OK to avoid user enumeration,
-        # but ensure the password remains unchanged and unusable.
+        # Always return 200 OK to prevent user enumeration while leaving the password unchanged and unusable.
         assert response.status_code == 200
         self.user.refresh_from_db()
         assert not self.user.has_usable_password()
