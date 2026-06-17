@@ -327,6 +327,7 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
         obj = json.loads(good_resp.content.decode('utf-8'))
         assert obj['success']
         assert 'e-mailed you instructions for setting your password' in obj['value']
+        assert len(mail.outbox) > 0
 
         from_email = configuration_helpers.get_value('email_from_address', settings.DEFAULT_FROM_EMAIL)
         sent_message = mail.outbox[0]
@@ -584,13 +585,32 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
 
     def test_password_reset_retired_user_complete_fail(self):
         """
-        Tests that a retired user cannot complete password reset even with a submitted form.
+        Tests that reset completion fails if retirement happens after reset initiation.
+
+        This simulates a user who initiated password reset before retirement
+        and then attempts to submit a completed reset form after retirement.
         """
+        # Initiate password reset before retirement and capture the issued token.
+        reset_init_request = self.request_factory.post('/password_reset/', {'email': self.user.email})
+        reset_init_request.user = self.user
+        reset_init_request.site = Mock(domain='example.com')
+        init_response = password_reset(reset_init_request)
+        assert init_response.status_code == 200
+        assert len(mail.outbox) > 0
+
+        sent_message = mail.outbox[0]
+        token_match = re.search(r'password_reset_confirm/(?P<uidb36>[0-9A-Za-z]+)-(?P<token>[^/]+)/', sent_message.body)
+        assert token_match is not None
+        token_data = token_match.groupdict()
+
+        # Retire the user after reset initiation.
         create_retirement_request_and_deactivate_account(self.user)
         self.user.refresh_from_db()
         assert not self.user.is_active
         old_password_hash = self.user.password
 
+        self.token = token_data['token']
+        self.uidb36 = token_data['uidb36']
         request_params = {'new_password1': 'new_password1', 'new_password2': 'new_password1'}
         confirm_request = self.request_factory.post(self.password_reset_confirm_url, data=request_params)
         self.setup_request_session_with_token(confirm_request)

@@ -264,10 +264,10 @@ def create_retirement_request_and_deactivate_account(user):
     user.save()
 
     # Do not unlink/redact social accounts during the initial retirement request.
-    # If the user cancels retirement during the 14-day cool-off period, they must
-    # still be able to authenticate using their existing social account. Redacting
-    # or deleting the social account at this stage would permanently break that
-    # login path. Therefore, social account unlinking/redaction should only occur
+    # If the user cancels retirement during the cool-off period, they must
+    # still be able to authenticate using their existing social account.
+    # Deleting the social account at this stage would permanently break that
+    # login path. Therefore, social account unlinking should only occur
     # when retirement is finalized after the cool-off period has elapsed.
     # Remove the activation keys sent by email to the user for account activation.
     Registration.objects.filter(user=user).delete()
