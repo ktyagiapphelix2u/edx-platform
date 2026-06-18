@@ -36,7 +36,7 @@ from openedx.core.djangoapps.oauth_dispatch.tests import factories as dot_factor
 from openedx.core.djangoapps.site_configuration import helpers as configuration_helpers
 from openedx.core.djangoapps.user_api.accounts import EMAIL_MAX_LENGTH, EMAIL_MIN_LENGTH
 from openedx.core.djangoapps.user_api.accounts.utils import create_retirement_request_and_deactivate_account
-from openedx.core.djangoapps.user_api.models import RetirementState, UserRetirementRequest
+from openedx.core.djangoapps.user_api.models import RetirementState
 from openedx.core.djangoapps.user_api.tests.test_views import UserAPITestCase
 from openedx.core.djangoapps.user_authn.views.password_reset import (
     PASSWORD_RESET_INITIATED,
@@ -548,21 +548,28 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
 
     def test_password_reset_retired_user_fail(self):
         """
-        Tests that if a retired user attempts to reset their password, it fails.
+        Tests that if a retired user attempts to complete a password reset, it fails.
         """
+        create_retirement_request_and_deactivate_account(self.user)
+        self.user.refresh_from_db()
         assert not self.user.is_active
+        assert not self.user.has_usable_password()
+        old_password_hash = self.user.password
 
-        # Retire the user.
-        UserRetirementRequest.create_retirement_request(self.user)
+        request_params = {'new_password1': 'new_password1', 'new_password2': 'new_password1'}
+        confirm_request = self.request_factory.post(self.password_reset_confirm_url, data=request_params)
+        self.setup_request_session_with_token(confirm_request)
+        confirm_request.user = self.user
 
-        reset_req = self.request_factory.get(self.password_reset_confirm_url)
-        reset_req.user = self.user
-        resp = PasswordResetConfirmWrapper.as_view()(reset_req, uidb36=self.uidb36, token=self.token)
+        # Attempt to submit reset-confirm form for retired user.
+        resp = PasswordResetConfirmWrapper.as_view()(confirm_request, uidb36=self.uidb36, token=self.token)
 
-        # Verify the response status code is: 200 with password reset fail and also verify that
-        # the user is not marked as active.
+        # Verify completion is blocked and password remains unchanged/unusable.
         assert resp.status_code == 200
-        assert not User.objects.get(pk=self.user.pk).is_active
+        self.user.refresh_from_db()
+        assert not self.user.is_active
+        assert not self.user.has_usable_password()
+        assert self.user.password == old_password_hash
 
     def test_password_reset_retired_user_initiation_fail(self):
         """
