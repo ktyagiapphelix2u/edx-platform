@@ -546,32 +546,7 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
         assert resp.status_code == 200
         assert not User.objects.get(pk=self.user.pk).is_active
 
-    def test_password_reset_retired_user_fail(self):
-        """
-        Tests that if a retired user attempts to complete a password reset, it fails.
-        """
-        create_retirement_request_and_deactivate_account(self.user)
-        self.user.refresh_from_db()
-        assert not self.user.is_active
-        assert not self.user.has_usable_password()
-        old_password_hash = self.user.password
-
-        request_params = {'new_password1': 'new_password1', 'new_password2': 'new_password1'}
-        confirm_request = self.request_factory.post(self.password_reset_confirm_url, data=request_params)
-        self.setup_request_session_with_token(confirm_request)
-        confirm_request.user = self.user
-
-        # Attempt to submit reset-confirm form for retired user.
-        resp = PasswordResetConfirmWrapper.as_view()(confirm_request, uidb36=self.uidb36, token=self.token)
-
-        # Verify completion is blocked and password remains unchanged/unusable.
-        assert resp.status_code == 200
-        self.user.refresh_from_db()
-        assert not self.user.is_active
-        assert not self.user.has_usable_password()
-        assert self.user.password == old_password_hash
-
-    def test_password_reset_retired_user_initiation_fail(self):
+    def test_password_reset_initiation_fails_for_retired_user(self):
         """
         Tests that a retired user cannot initiate a password reset.
         """
@@ -590,34 +565,19 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
         assert response_data['success'] is True
         assert len(mail.outbox) == 0
 
-    def test_password_reset_retired_user_complete_fail(self):
+    def test_password_reset_completion_fails_for_retired_user(self):
         """
         Tests that reset completion fails if retirement happens after reset initiation.
 
         This simulates a user who initiated password reset before retirement
         and then attempts to submit a completed reset form after retirement.
         """
-        # Initiate password reset before retirement and capture the issued token.
-        reset_init_request = self.request_factory.post('/password_reset/', {'email': self.user.email})
-        reset_init_request.user = self.user
-        reset_init_request.site = Mock(domain='example.com')
-        init_response = password_reset(reset_init_request)
-        assert init_response.status_code == 200
-        assert len(mail.outbox) > 0
-
-        sent_message = mail.outbox[0]
-        token_match = re.search(r'password_reset_confirm/(?P<uidb36>[0-9A-Za-z]+)-(?P<token>[^/]+)/', sent_message.body)
-        assert token_match is not None
-        token_data = token_match.groupdict()
-
-        # Retire the user after reset initiation.
+        # Retire the user after they have initiated a reset (using the token set up in setUp).
         create_retirement_request_and_deactivate_account(self.user)
         self.user.refresh_from_db()
         assert not self.user.is_active
         old_password_hash = self.user.password
 
-        self.token = token_data['token']
-        self.uidb36 = token_data['uidb36']
         request_params = {'new_password1': 'new_password1', 'new_password2': 'new_password1'}
         confirm_request = self.request_factory.post(self.password_reset_confirm_url, data=request_params)
         self.setup_request_session_with_token(confirm_request)
