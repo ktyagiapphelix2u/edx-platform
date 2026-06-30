@@ -564,10 +564,12 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
         response_data = json.loads(response.content.decode('utf-8'))
         assert response_data['success'] is True
         assert len(mail.outbox) == 0
+        self.user.refresh_from_db()
+        assert not self.user.is_active
 
     def test_password_reset_completion_fails_for_retired_user(self):
         """
-        Tests that reset completion fails if retirement happens after reset initiation.
+        Tests that password reset completion fails if retirement happens after reset initiation.
 
         This simulates a user who initiated password reset before retirement
         and then attempts to submit a completed reset form after retirement.
@@ -588,6 +590,7 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
         # Always return 200 OK to prevent user enumeration while leaving the password unchanged and unusable.
         assert response.status_code == 200
         self.user.refresh_from_db()
+        assert not self.user.is_active
         assert not self.user.has_usable_password()
         assert self.user.password == old_password_hash
 
