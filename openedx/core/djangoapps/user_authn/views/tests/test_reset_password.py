@@ -578,6 +578,7 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
         create_retirement_request_and_deactivate_account(self.user)
         self.user.refresh_from_db()
         assert not self.user.is_active
+        assert not self.user.has_usable_password()
         old_password_hash = self.user.password
 
         request_params = {'new_password1': 'new_password1', 'new_password2': 'new_password1'}
