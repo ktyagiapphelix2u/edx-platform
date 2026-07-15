@@ -42,7 +42,7 @@ def _listen_for_course_publish(sender, course_key, **kwargs):  # pylint: disable
 @receiver(USER_RETIRE_LMS_CRITICAL)
 def _listen_for_lms_retire(sender, **kwargs):  # pylint: disable=unused-argument
     """
-    Retire verify_student records handled in the LMS critical retirement phase.
+    Retire verify_student records handled in the LMS retirement.
     """
     user = kwargs.get('user')
     SoftwareSecurePhotoVerification.retire_user(user.id)
