@@ -1,5 +1,5 @@
 """
-Configuration toggles for the verify_student app.
+Configuration toggles for ManualVerification retirement.
 """
 
 from edx_toggles.toggles import SettingToggle
