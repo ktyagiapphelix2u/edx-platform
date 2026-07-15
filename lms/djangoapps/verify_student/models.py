@@ -198,7 +198,7 @@ class ManualVerification(IDVerificationAttempt, DeletableByUserValue):
     @classmethod
     def redact_before_delete_fields(cls):
         """
-        Redact PII fields before delete in downstream soft-delete systems.
+        Clear PII fields before delete in downstream soft-delete systems.
         """
         return {'name': ''}
 
