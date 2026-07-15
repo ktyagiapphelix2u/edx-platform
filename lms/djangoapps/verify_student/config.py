@@ -8,7 +8,7 @@ from edx_toggles.toggles import SettingToggle
 # .. toggle_implementation: SettingToggle
 # .. toggle_default: False
 # .. toggle_description: Clears the `name` field for `ManualVerification` records
-#      before deleting those rows during learner retirement.
+#      before deleting those rows during user retirement.
 # .. toggle_use_cases: open_edx
 # .. toggle_creation_date: 2026-07-15
 REDACT_MANUAL_VERIFICATION_HISTORICAL_PII = SettingToggle(
