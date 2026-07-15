@@ -2,15 +2,19 @@
 Unit tests for the VerificationDeadline signals
 """
 
-
+import ddt
 from datetime import timedelta
 from unittest.mock import patch  # pylint: disable=wrong-import-order
 
+from django.db import connection
+from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils.timezone import now
 
 from common.djangoapps.student.models_api import do_name_change_request
 from common.djangoapps.student.tests.factories import UserFactory
 from lms.djangoapps.verify_student.models import (
+    ManualVerification,
     SoftwareSecurePhotoVerification,
     VerificationAttempt,
     VerificationDeadline,
@@ -25,6 +29,7 @@ from lms.djangoapps.verify_student.tests.factories import (
     VerificationAttemptFactory,
 )
 from openedx.core.djangoapps.user_api.accounts.tests.retirement_helpers import fake_completed_retirement
+from openedx.core.djangolib.testing.utils import assert_redact_before_delete
 from xmodule.modulestore.tests.django_utils import (
     ModuleStoreTestCase,  # pylint: disable=wrong-import-order
 )
@@ -68,9 +73,10 @@ class VerificationDeadlineHandlerTest(ModuleStoreTestCase):
         assert actual_deadline == deadline
 
 
+@ddt.ddt
 class RetirementHandlerTest(ModuleStoreTestCase):
     """
-    Tests for the VerificationDeadline handler
+    Tests for verify_student handlers in the LMS retirement flow.
     """
 
     def _create_entry(self):
@@ -117,6 +123,44 @@ class RetirementHandlerTest(ModuleStoreTestCase):
         # All values for this user should now be empty string
         for field in ('name', 'face_image_url', 'photo_id_image_url', 'photo_id_key'):
             assert '' == getattr(ver_obj, field)
+
+    @ddt.data(
+        ddt.named_data('toggle_disabled_retains_record', False),
+        ddt.named_data('toggle_enabled_redacts_and_deletes', True),
+    )
+    def test_manual_verification_retirement_behavior(self, toggle_enabled):
+        user = UserFactory()
+        other_user = UserFactory()
+        user_name = 'Manual Verification Name'
+        ManualVerification.objects.create(
+            user=user,
+            name=user_name,
+            status='approved',
+        )
+        ManualVerification.objects.create(
+            user=other_user,
+            name=user_name,
+            status='approved',
+        )
+
+        with override_settings(REDACT_MANUAL_VERIFICATION_HISTORICAL_PII=toggle_enabled):
+            if toggle_enabled:
+                with CaptureQueriesContext(connection) as context:
+                    _listen_for_lms_retire(sender=self.__class__, user=user)
+                assert_redact_before_delete(
+                    [query['sql'] for query in context.captured_queries],
+                    table=ManualVerification._meta.db_table,
+                    expected_redacted_value_list=[''],
+                )
+            else:
+                _listen_for_lms_retire(sender=self.__class__, user=user)
+
+        if toggle_enabled:
+            assert not ManualVerification.objects.filter(user=user).exists()
+        else:
+            manual_verification = ManualVerification.objects.get(user=user)
+            assert manual_verification.name == user_name
+        assert ManualVerification.objects.filter(user=other_user, name=user_name).exists()
 
 
 class PostSavePhotoVerificationTest(ModuleStoreTestCase):
