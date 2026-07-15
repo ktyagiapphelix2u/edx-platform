@@ -1,5 +1,5 @@
 """
-Configuration toggles for ManualVerification retirement.
+Configuration toggles for ManualVerification.
 """
 
 from edx_toggles.toggles import SettingToggle
