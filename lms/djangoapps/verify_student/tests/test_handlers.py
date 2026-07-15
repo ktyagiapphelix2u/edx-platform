@@ -5,7 +5,6 @@ Unit tests for the VerificationDeadline signals
 from datetime import timedelta
 from unittest.mock import patch  # pylint: disable=wrong-import-order
 
-import ddt
 from django.db import connection
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
@@ -73,7 +72,6 @@ class VerificationDeadlineHandlerTest(ModuleStoreTestCase):
         assert actual_deadline == deadline
 
 
-@ddt.ddt
 class RetirementHandlerTest(ModuleStoreTestCase):
     """
     Tests for verify_student handlers in the LMS retirement flow.
@@ -124,8 +122,7 @@ class RetirementHandlerTest(ModuleStoreTestCase):
         for field in ('name', 'face_image_url', 'photo_id_image_url', 'photo_id_key'):
             assert '' == getattr(ver_obj, field)
 
-    @ddt.data(False, True)
-    def test_manual_verification_retirement_behavior(self, toggle_enabled):
+    def test_manual_verification_retirement_behavior(self):
         user = UserFactory()
         other_user = UserFactory()
         user_name = 'Manual Verification Name'
@@ -140,24 +137,24 @@ class RetirementHandlerTest(ModuleStoreTestCase):
             status='approved',
         )
 
-        with override_settings(REDACT_MANUAL_VERIFICATION_HISTORICAL_PII=toggle_enabled):
-            if toggle_enabled:
-                with CaptureQueriesContext(connection) as context:
-                    _listen_for_lms_retire(sender=self.__class__, user=user)
-                assert_redact_before_delete(
-                    [query['sql'] for query in context.captured_queries],
-                    table=ManualVerification._meta.db_table,
-                    expected_redacted_value_list=[''],
-                )
-            else:
+        with override_settings(REDACT_MANUAL_VERIFICATION_HISTORICAL_PII=False):
+            _listen_for_lms_retire(sender=self.__class__, user=user)
+
+        manual_verification = ManualVerification.objects.get(user=user)
+        assert manual_verification.name == user_name
+        assert ManualVerification.objects.filter(user=user).exists()
+        assert ManualVerification.objects.filter(user=other_user, name=user_name).exists()
+
+        with override_settings(REDACT_MANUAL_VERIFICATION_HISTORICAL_PII=True):
+            with CaptureQueriesContext(connection) as context:
                 _listen_for_lms_retire(sender=self.__class__, user=user)
 
-        if toggle_enabled:
-            assert not ManualVerification.objects.filter(user=user).exists()
-        else:
-            manual_verification = ManualVerification.objects.get(user=user)
-            assert manual_verification.name == user_name
-            assert ManualVerification.objects.filter(user=user).exists()
+        assert_redact_before_delete(
+            [query['sql'] for query in context.captured_queries],
+            table=ManualVerification._meta.db_table,
+            expected_redacted_value_list=[''],
+        )
+        assert not ManualVerification.objects.filter(user=user).exists()
 
         assert ManualVerification.objects.filter(user=other_user, name=user_name).exists()
 
