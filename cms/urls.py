@@ -237,8 +237,6 @@ if toggles.ENABLE_CONTENT_LIBRARIES:
     urlpatterns += [
         re_path(fr'^library/{LIBRARY_KEY_PATTERN}?$',
                 contentstore_views.library_handler, name='library_handler'),
-        re_path(fr'^library/{LIBRARY_KEY_PATTERN}/team/$',
-                contentstore_views.manage_library_users, name='manage_library_users'),
     ]
 
 if toggles.EXPORT_GIT.is_enabled():
@@ -267,7 +265,7 @@ if core_toggles.ENTRANCE_EXAMS.is_enabled():
                        contentstore_views.entrance_exam))
 
 # Enable Web/HTML Certificates
-if settings.FEATURES.get('CERTIFICATES_HTML_VIEW'):
+if settings.CERTIFICATES_HTML_VIEW:
     from cms.djangoapps.contentstore.views.certificates import (  # noqa: I001 - conditional import inside if block
         CertificateActivationAPIView,
         CertificateDetailAPIView,

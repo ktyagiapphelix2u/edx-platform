@@ -11,7 +11,6 @@ import ddt
 import pytest
 import pytz
 from ccx_keys.locator import CCXLocator
-from crum import set_current_request
 from django.conf import settings
 from django.contrib.auth.models import User  # pylint: disable=imported-auth-user
 from django.test import TestCase
@@ -19,7 +18,6 @@ from django.test.client import RequestFactory
 from django.test.utils import override_settings
 from django.urls import reverse
 from edx_toggles.toggles.testutils import override_waffle_flag
-from enterprise.api.v1.serializers import EnterpriseCustomerSerializer
 from milestones.tests.utils import MilestonesTestCaseMixin
 from opaque_keys.edx.locator import CourseLocator
 
@@ -43,18 +41,13 @@ from lms.djangoapps.ccx.models import CustomCourseForEdX
 from lms.djangoapps.courseware.masquerade import CourseMasquerade
 from lms.djangoapps.courseware.tests.helpers import LoginEnrollmentTestCase, masquerade_as_group_member
 from lms.djangoapps.courseware.toggles import course_is_invitation_only
+from openedx.core.djangoapps.authz.tests.mixins import CourseAuthoringAuthzTestMixin
 from openedx.core.djangoapps.content.course_overviews.models import CourseOverview
 from openedx.core.djangoapps.content.course_overviews.tests.factories import CourseOverviewFactory
 from openedx.core.djangoapps.waffle_utils.testutils import WAFFLE_TABLES
 from openedx.core.djangolib.testing.utils import AUTHZ_TABLES
 from openedx.features.content_type_gating.models import ContentTypeGatingConfig
 from openedx.features.course_experience import ENFORCE_MASQUERADE_START_DATES
-from openedx.features.enterprise_support.api import add_enterprise_customer_to_session
-from openedx.features.enterprise_support.tests.factories import (
-    EnterpriseCourseEnrollmentFactory,
-    EnterpriseCustomerFactory,
-    EnterpriseCustomerUserFactory,
-)
 from xmodule.course_block import (  # pylint: disable=wrong-import-order
     CATALOG_VISIBILITY_ABOUT,
     CATALOG_VISIBILITY_CATALOG_AND_ABOUT,
@@ -912,7 +905,7 @@ class CourseOverviewAccessTestCase(ModuleStoreTestCase):
     )
     @ddt.unpack
     @patch.dict('django.conf.settings.FEATURES', {'DISABLE_START_DATES': False})
-    def test_course_catalog_access_num_queries_no_enterprise(self, user_attr_name, action, course_attr_name):
+    def test_course_catalog_access_num_queries(self, user_attr_name, action, course_attr_name):
         ContentTypeGatingConfig.objects.create(enabled=True, enabled_as_of=datetime.datetime(2018, 1, 1))
 
         course = getattr(self, course_attr_name)
@@ -952,70 +945,70 @@ class CourseOverviewAccessTestCase(ModuleStoreTestCase):
         with self.assertNumQueries(num_queries, table_ignorelist=QUERY_COUNT_TABLE_IGNORELIST):
             bool(access.has_access(user, action, course_overview, course_key=course.id))
 
-    @ddt.data(
-        *itertools.product(
-            ['user_normal', 'user_staff', 'user_anonymous'],
-            ['course_started', 'course_not_started'],
+
+class AuthzSeeAboutPageAccessTestCase(CourseAuthoringAuthzTestMixin, SharedModuleStoreTestCase):
+    """
+    AuthZ-specific see_about_page edge cases not covered elsewhere.
+
+    Catalog visibility grants, staff bypass, AuthZ role grants, and learner
+    denials are tested in test__catalog_visibility*, TestGetCourseDetailAuthz,
+    and AuthzAboutPageTestCase.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.course_public = CourseFactory.create(
+            catalog_visibility=CATALOG_VISIBILITY_CATALOG_AND_ABOUT,
+            course="authzpublic",
         )
-    )
-    @ddt.unpack
-    @patch.dict('django.conf.settings.FEATURES', {'DISABLE_START_DATES': False, 'ENABLE_ENTERPRISE_INTEGRATION': True})
-    def test_course_catalog_access_num_queries_enterprise(self, user_attr_name, course_attr_name):
-        """
-        Similar to test_course_catalog_access_num_queries_no_enterprise, except enable enterprise features and make the
-        basic enrollment look like an enterprise-subsidized enrollment, setting up one of each:
+        cls.course_about_only = CourseFactory.create(
+            catalog_visibility=CATALOG_VISIBILITY_ABOUT,
+            course="authzabout",
+        )
+        cls.course_hidden = CourseFactory.create(
+            catalog_visibility=CATALOG_VISIBILITY_NONE,
+            course="authzhidden",
+        )
 
-        * EnterpriseCustomer
-        * EnterpriseCustomerUser
-        * EnterpriseCourseEnrollment
-        * A mock request session to pre-cache the enterprise customer data.
-        """
-        ContentTypeGatingConfig.objects.create(enabled=True, enabled_as_of=datetime.datetime(2018, 1, 1))
-
-        course = getattr(self, course_attr_name)
-
-        request = RequestFactory().get('/')
-        request.session = {}
-
-        # get a fresh user object that won't have any cached role information
-        if user_attr_name == 'user_anonymous':
-            user = AnonymousUserFactory()
-            request.user = user
-        else:
-            user = getattr(self, user_attr_name)
-            user = User.objects.get(id=user.id)
-            request.user = user
-            course_enrollment = CourseEnrollmentFactory(user=user, course_id=course.id)  # noqa: F841
-            enterprise_customer = EnterpriseCustomerFactory(enable_learner_portal=True)
-            add_enterprise_customer_to_session(request, EnterpriseCustomerSerializer(enterprise_customer).data)
-            enterprise_customer_user = EnterpriseCustomerUserFactory(
-                user_id=user.id,
-                enterprise_customer=enterprise_customer,
-            )
-            EnterpriseCourseEnrollmentFactory(enterprise_customer_user=enterprise_customer_user, course_id=course.id)
-        set_current_request(request)
-
-        if user_attr_name == 'user_staff':
-            if course_attr_name == 'course_started':
-                # read: CourseAccessRole + django_comment_client.Role
-                num_queries = 4
-            else:
-                # read: CourseAccessRole + EnterpriseCourseEnrollment
-                num_queries = 4
-        elif user_attr_name == 'user_normal':
-            if course_attr_name == 'course_started':
-                # read: CourseAccessRole + django_comment_client.Role + FBEEnrollmentExclusion + CourseMode
-                num_queries = 6
-            else:
-                # read: CourseAccessRole + CourseEnrollmentAllowed + EnterpriseCourseEnrollment
-                num_queries = 5
-        elif user_attr_name == 'user_anonymous':
-            if course_attr_name == 'course_started':
-                # read: CourseMode
-                num_queries = 1
-            else:
-                num_queries = 0
-
+    def _see_about_page_response(self, user, course):
         course_overview = CourseOverview.get_from_id(course.id)
-        with self.assertNumQueries(num_queries, table_ignorelist=QUERY_COUNT_TABLE_IGNORELIST):
-            bool(access.has_access(user, 'see_exists', course_overview, course_key=course.id))
+        return access.has_access(user, "see_about_page", course_overview, course_key=course.id)
+
+    def test_enrolled_learner_denied_when_catalog_hidden(self):
+        """Enrollment alone does not grant about-page access when catalog is hidden."""
+        CourseEnrollmentFactory(user=self.unauthorized_user, course_id=self.course_hidden.id)
+
+        response = self._see_about_page_response(self.unauthorized_user, self.course_hidden)
+
+        assert not response
+        assert isinstance(response, access_response.CatalogVisibilityError)
+
+    def test_beta_tester_granted_via_catalog_about(self):
+        """Beta testers rely on catalog visibility, not AuthZ authoring permissions."""
+        beta_tester = BetaTesterFactory.create(course_key=self.course_about_only.id)
+
+        response = self._see_about_page_response(beta_tester, self.course_about_only)
+
+        assert response
+
+    def test_anonymous_user_uses_legacy_path(self):
+        """
+        Anonymous users skip the AuthZ path even when course authoring AuthZ is enabled.
+
+        user_has_course_permission is only reached on the AuthZ path, so it must not
+        be called for anonymous users on a catalog-hidden course.
+        """
+        anonymous_user = AnonymousUserFactory.create()
+
+        with patch(
+            "lms.djangoapps.courseware.access.user_has_course_permission",
+        ) as mock_authz_permission:
+            hidden_response = self._see_about_page_response(anonymous_user, self.course_hidden)
+
+        mock_authz_permission.assert_not_called()
+        assert not hidden_response
+        assert isinstance(hidden_response, access_response.CatalogVisibilityError)
+
+        public_response = self._see_about_page_response(anonymous_user, self.course_public)
+        assert public_response

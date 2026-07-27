@@ -24,16 +24,12 @@ from cms.djangoapps.contentstore.xblock_storage_handlers.view_handlers import cr
 from cms.djangoapps.course_creators.views import get_course_creator_status
 from common.djangoapps.edxmako.shortcuts import render_to_response
 from common.djangoapps.student.auth import (
-    STUDIO_EDIT_ROLES,
-    STUDIO_VIEW_USERS,
-    get_user_permissions,
     has_studio_read_access,
     has_studio_write_access,
 )
 from common.djangoapps.student.roles import (
     CourseInstructorRole,
     CourseStaffRole,
-    LibraryUserRole,
     OrgStaffRole,
     UserBasedRole,
 )
@@ -45,9 +41,8 @@ from xmodule.modulestore.exceptions import DuplicateCourseError
 from ..toggles import libraries_v1_enabled
 from ..utils import add_instructor, reverse_library_url
 from .component import CONTAINER_TEMPLATES, get_component_templates
-from .user import user_with_role
 
-__all__ = ['library_handler', 'manage_library_users']
+__all__ = ['library_handler']
 
 log = logging.getLogger(__name__)
 
@@ -72,7 +67,7 @@ def _user_can_create_library_for_org(user, org=None):
         return False
     elif user.is_staff:
         return True
-    elif settings.FEATURES.get('ENABLE_CREATOR_GROUP', False):
+    elif getattr(settings, 'ENABLE_CREATOR_GROUP', False):
         is_course_creator = get_course_creator_status(user) == 'granted'
         if is_course_creator:
             return True
@@ -92,8 +87,8 @@ def _user_can_create_library_for_org(user, org=None):
         return False
     else:
         # EDUCATOR-1924: DISABLE_LIBRARY_CREATION overrides DISABLE_COURSE_CREATION, if present.
-        disable_library_creation = settings.FEATURES.get('DISABLE_LIBRARY_CREATION', None)
-        disable_course_creation = settings.FEATURES.get('DISABLE_COURSE_CREATION', False)
+        disable_library_creation = settings.DISABLE_LIBRARY_CREATION
+        disable_course_creation = getattr(settings, 'DISABLE_COURSE_CREATION', False)
         if disable_library_creation is not None:
             return not disable_library_creation
         else:
@@ -310,43 +305,4 @@ def library_blocks_view(library, user, response_format):
         'component_templates': component_templates,
         'xblock_info': xblock_info,
         'templates': CONTAINER_TEMPLATES,
-    })
-
-
-def manage_library_users(request, library_key_string):
-    """
-    Studio UI for editing the users within a library.
-
-    Uses the /course_team/:library_key/:user_email/ REST API to make changes.
-    """
-    library_key = CourseKey.from_string(library_key_string)
-    if not isinstance(library_key, LibraryLocator):
-        raise Http404  # This is not a library
-    user_perms = get_user_permissions(request.user, library_key)
-    if not user_perms & STUDIO_VIEW_USERS:
-        raise PermissionDenied()
-    library = modulestore().get_library(library_key)
-    if library is None:
-        raise Http404
-
-    # Segment all the users explicitly associated with this library, ensuring each user only has one role listed:
-    instructors = set(CourseInstructorRole(library_key).users_with_role())
-    staff = set(CourseStaffRole(library_key).users_with_role()) - instructors
-    users = set(LibraryUserRole(library_key).users_with_role()) - instructors - staff
-
-    formatted_users = []
-    for user in instructors:
-        formatted_users.append(user_with_role(user, 'instructor'))
-    for user in staff:
-        formatted_users.append(user_with_role(user, 'staff'))
-    for user in users:
-        formatted_users.append(user_with_role(user, 'library_user'))
-
-    return render_to_response('manage_users_lib.html', {
-        'context_library': library,
-        'users': formatted_users,
-        'allow_actions': bool(user_perms & STUDIO_EDIT_ROLES),
-        'library_key': str(library_key),
-        'lib_users_url': reverse_library_url('manage_library_users', library_key_string),
-        'show_children_previews': library.show_children_previews
     })

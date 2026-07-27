@@ -82,6 +82,7 @@ from lms.djangoapps.courseware.courses import (
     sort_by_start_date,
 )
 from lms.djangoapps.courseware.date_summary import verified_upgrade_deadline_link
+from lms.djangoapps.courseware.decorators import courseware_view_hooks
 from lms.djangoapps.courseware.exceptions import CourseAccessRedirect, Redirect
 from lms.djangoapps.courseware.masquerade import is_masquerading_as_specific_student, setup_masquerade
 from lms.djangoapps.courseware.model_data import FieldDataCache
@@ -137,7 +138,6 @@ from openedx.features.course_experience.url_helpers import (
 )
 from openedx.features.course_experience.utils import dates_banner_should_display
 from openedx.features.course_experience.waffle import ENABLE_COURSE_ABOUT_SIDEBAR_HTML
-from openedx.features.enterprise_support.api import data_sharing_consent_required
 from xmodule.course_block import (
     CATALOG_VISIBILITY_CATALOG_AND_ABOUT,
     COURSE_VISIBILITY_PUBLIC,
@@ -303,14 +303,14 @@ def courses(request):
     courses_list = []
     course_discovery_meanings = getattr(settings, 'COURSE_DISCOVERY_MEANINGS', {})
     set_default_filter = ENABLE_COURSE_DISCOVERY_DEFAULT_LANGUAGE_FILTER.is_enabled()
-    if not settings.FEATURES.get('ENABLE_COURSE_DISCOVERY'):
+    if not settings.ENABLE_COURSE_DISCOVERY:
         courses_list = get_courses(
             request.user,
             filter_={"catalog_visibility": CATALOG_VISIBILITY_CATALOG_AND_ABOUT},
         )
 
         if configuration_helpers.get_value("ENABLE_COURSE_SORTING_BY_START_DATE",
-                                           settings.FEATURES["ENABLE_COURSE_SORTING_BY_START_DATE"]):
+                                           settings.ENABLE_COURSE_SORTING_BY_START_DATE):
             courses_list = sort_by_start_date(courses_list)
         else:
             courses_list = sort_by_announcement(courses_list)
@@ -521,7 +521,7 @@ class CourseTabView(EdxFragmentView):
     """
     @method_decorator(ensure_csrf_cookie)
     @method_decorator(ensure_valid_course_key)
-    @method_decorator(data_sharing_consent_required)
+    @method_decorator(courseware_view_hooks)
     def get(self, request, course_id, tab_type, **kwargs):  # pylint: disable=arguments-differ
         """
         Displays a course tab page that contains a web fragment.
@@ -833,7 +833,7 @@ def course_about(request, course_id):  # pylint: disable=too-many-statements
         show_courseware_link = bool(
             (
                 request.user.has_perm(VIEW_COURSEWARE, course)
-            ) or settings.FEATURES.get('ENABLE_LMS_MIGRATION')
+            ) or settings.ENABLE_LMS_MIGRATION
         )
 
         # If the ecommerce checkout flow is enabled and the mode of the course is
@@ -970,7 +970,7 @@ def dates(request, course_id):
 @login_required
 @cache_control(no_cache=True, no_store=True, must_revalidate=True)
 @ensure_valid_course_key
-@data_sharing_consent_required
+@courseware_view_hooks
 def progress(request, course_id, student_id=None):
     """ Display the progress page. """
     course_key = CourseKey.from_string(course_id)
@@ -1164,7 +1164,7 @@ def credit_course_requirements(course_key, student):
     # If credit eligibility is not enabled or this is not a credit course,
     # short-circuit and return `None`.  This indicates that credit requirements
     # should NOT be displayed on the progress page.
-    if not (settings.FEATURES.get("ENABLE_CREDIT_ELIGIBILITY", False) and is_credit_course(course_key)):
+    if not (settings.ENABLE_CREDIT_ELIGIBILITY and is_credit_course(course_key)):
         return None
 
     # This indicates that credit requirements should NOT be displayed on the progress page.
@@ -1706,7 +1706,7 @@ def render_xblock(request, usage_key_string, check_if_enrolled=True, disable_sta
                 'enable_completion_on_view_service': enable_completion_on_view_service,
                 'edx_notes_enabled': is_feature_enabled(course, request.user),
                 'staff_access': staff_access,
-                'xqa_server': settings.FEATURES.get('XQA_SERVER', 'http://your_xqa_server.com'),
+                'xqa_server': settings.XQA_SERVER,
                 'missed_deadlines': missed_deadlines,
                 'missed_gated_content': missed_gated_content,
                 'has_ended': course.has_ended(),

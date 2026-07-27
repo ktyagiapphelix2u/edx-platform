@@ -17,11 +17,10 @@ from organizations.api import get_organization_by_short_name
 from organizations.exceptions import InvalidOrganizationException
 
 from cms.djangoapps.contentstore.tests.utils import AjaxEnabledTestClient, CourseTestCase, parse_json
-from cms.djangoapps.contentstore.utils import reverse_course_url, reverse_library_url
 from cms.djangoapps.course_creators.models import CourseCreator
 from cms.djangoapps.course_creators.views import add_user_with_status_granted as grant_course_creator_status
 from common.djangoapps.student import auth
-from common.djangoapps.student.roles import CourseInstructorRole, CourseStaffRole, LibraryUserRole
+from common.djangoapps.student.roles import CourseInstructorRole, CourseStaffRole
 from xmodule.modulestore.tests.factories import LibraryFactory  # pylint: disable=wrong-import-order
 
 from ..component import get_component_templates
@@ -39,7 +38,7 @@ def make_url_for_lib(key):
 
 
 @ddt.ddt
-@mock.patch.dict('django.conf.settings.FEATURES', {'DISABLE_COURSE_CREATION': False})
+@override_settings(DISABLE_COURSE_CREATION=False)
 class UnitTestLibraries(CourseTestCase):
     """
     Unit tests for library views
@@ -70,7 +69,7 @@ class UnitTestLibraries(CourseTestCase):
     @mock.patch("cms.djangoapps.contentstore.toggles.libraries_v1_enabled", True)
     def test_library_creator_status_for_enabled_creator_group_setting_for_non_staff_users(self):
         _, nostaff_user = self.create_non_staff_authed_user_client()
-        with mock.patch.dict('django.conf.settings.FEATURES', {"ENABLE_CREATOR_GROUP": True}):
+        with override_settings(ENABLE_CREATOR_GROUP=True):
             self.assertEqual(user_can_create_library(nostaff_user, None), False)  # noqa: PT009
 
     # Global staff can create libraries for any org, even ones that don't exist.
@@ -88,14 +87,14 @@ class UnitTestLibraries(CourseTestCase):
     # When creator groups are enabled, global staff can create libraries in any org
     @mock.patch("cms.djangoapps.contentstore.toggles.libraries_v1_enabled", True)
     def test_library_creator_status_for_enabled_creator_group_setting_with_is_staff_user(self):
-        with mock.patch.dict('django.conf.settings.FEATURES', {"ENABLE_CREATOR_GROUP": True}):
+        with override_settings(ENABLE_CREATOR_GROUP=True):
             self.assertEqual(user_can_create_library(self.user, 'RandomOrg'), True)  # noqa: PT009
 
     # When creator groups are enabled, course creators can create libraries in any org.
     @mock.patch("cms.djangoapps.contentstore.toggles.libraries_v1_enabled", True)
     def test_library_creator_status_with_course_creator_role_for_enabled_creator_group_setting(self):
         _, nostaff_user = self.create_non_staff_authed_user_client()
-        with mock.patch.dict('django.conf.settings.FEATURES', {"ENABLE_CREATOR_GROUP": True}):
+        with override_settings(ENABLE_CREATOR_GROUP=True):
             grant_course_creator_status(self.user, nostaff_user)
             self.assertEqual(user_can_create_library(nostaff_user, 'soMeRandOmoRg'), True)  # noqa: PT009
 
@@ -104,7 +103,7 @@ class UnitTestLibraries(CourseTestCase):
     @mock.patch("cms.djangoapps.contentstore.toggles.libraries_v1_enabled", True)
     def test_library_creator_status_with_course_staff_role_for_enabled_creator_group_setting(self):
         _, nostaff_user = self.create_non_staff_authed_user_client()
-        with mock.patch.dict('django.conf.settings.FEATURES', {"ENABLE_CREATOR_GROUP": True}):
+        with override_settings(ENABLE_CREATOR_GROUP=True):
             auth.add_users(self.user, CourseStaffRole(self.course.id), nostaff_user)
             self.assertEqual(user_can_create_library(nostaff_user, self.course.org), True)  # noqa: PT009
             self.assertEqual(user_can_create_library(nostaff_user, 'SomEOtherOrg'), False)  # noqa: PT009
@@ -114,7 +113,7 @@ class UnitTestLibraries(CourseTestCase):
     @mock.patch("cms.djangoapps.contentstore.toggles.libraries_v1_enabled", True)
     def test_library_creator_status_with_course_instructor_role_for_enabled_creator_group_setting(self):
         _, nostaff_user = self.create_non_staff_authed_user_client()
-        with mock.patch.dict('django.conf.settings.FEATURES', {"ENABLE_CREATOR_GROUP": True}):
+        with override_settings(ENABLE_CREATOR_GROUP=True):
             auth.add_users(self.user, CourseInstructorRole(self.course.id), nostaff_user)
             self.assertEqual(user_can_create_library(nostaff_user, self.course.org), True)  # noqa: PT009
             self.assertEqual(user_can_create_library(nostaff_user, 'SomEOtherOrg'), False)  # noqa: PT009
@@ -134,16 +133,13 @@ class UnitTestLibraries(CourseTestCase):
         """
         _, nostaff_user = self.create_non_staff_authed_user_client()
         with mock.patch("cms.djangoapps.contentstore.toggles.libraries_v1_enabled", True):
-            with mock.patch.dict(
-                "django.conf.settings.FEATURES",
-                {
-                    "DISABLE_COURSE_CREATION": disable_course,
-                    "DISABLE_LIBRARY_CREATION": disable_library
-                }
+            with override_settings(
+                DISABLE_COURSE_CREATION=disable_course,
+                DISABLE_LIBRARY_CREATION=disable_library,
             ):
                 self.assertEqual(user_can_create_library(nostaff_user, 'SomEOrg'), expected_status)  # noqa: PT009
 
-    @mock.patch.dict('django.conf.settings.FEATURES', {'DISABLE_COURSE_CREATION': True})
+    @override_settings(DISABLE_COURSE_CREATION=True)
     @mock.patch("cms.djangoapps.contentstore.toggles.libraries_v1_enabled", True)
     def test_library_creator_status_with_no_course_creator_role_and_disabled_nonstaff_course_creation(self):
         """
@@ -206,7 +202,7 @@ class UnitTestLibraries(CourseTestCase):
         self.assertEqual(response.status_code, 200)  # noqa: PT009
         # That's all we check. More detailed tests are in contentstore.tests.test_libraries...
 
-    @patch.dict('django.conf.settings.FEATURES', {'ENABLE_CREATOR_GROUP': True})
+    @override_settings(ENABLE_CREATOR_GROUP=True)
     def test_lib_create_permission(self):
         """
         Users who are given course creator roles should be able to create libraries.
@@ -220,7 +216,7 @@ class UnitTestLibraries(CourseTestCase):
         })
         self.assertEqual(response.status_code, 200)  # noqa: PT009
 
-    @patch.dict('django.conf.settings.FEATURES', {'ENABLE_CREATOR_GROUP': False})
+    @override_settings(ENABLE_CREATOR_GROUP=False)
     def test_lib_create_permission_no_course_creator_role_and_no_course_creator_group(self):
         """
         Users who are not given course creator roles should still be able to create libraries
@@ -234,7 +230,7 @@ class UnitTestLibraries(CourseTestCase):
         })
         self.assertEqual(response.status_code, 200)  # noqa: PT009
 
-    @patch.dict('django.conf.settings.FEATURES', {'ENABLE_CREATOR_GROUP': True})
+    @override_settings(ENABLE_CREATOR_GROUP=True)
     def test_lib_create_permission_no_course_creator_role_and_no_course_creator_group_and_no_course_staff_role(self):
         """
         Users who are not given course creator roles or course staff role should not be able to create libraries
@@ -248,7 +244,7 @@ class UnitTestLibraries(CourseTestCase):
         })
         self.assertEqual(response.status_code, 403)  # noqa: PT009
 
-    @patch.dict('django.conf.settings.FEATURES', {'ENABLE_CREATOR_GROUP': True})
+    @override_settings(ENABLE_CREATOR_GROUP=True)
     def test_lib_create_permission_course_staff_role(self):
         """
         Users who are staff on any existing course should able to create libraries
@@ -427,33 +423,6 @@ class UnitTestLibraries(CourseTestCase):
         for advance_problem_type in settings.ADVANCED_PROBLEM_TYPES:
             self.assertNotIn(advance_problem_type['component'], problem_type_categories)  # noqa: PT009
 
-    def test_manage_library_users(self):
-        """
-        Simple test that the Library "User Access" view works.
-        Also tests that we can use the REST API to assign a user to a library.
-        """
-        library = LibraryFactory.create()
-        extra_user, _ = self.create_non_staff_user()
-        manage_users_url = reverse_library_url('manage_library_users', str(library.location.library_key))
-
-        response = self.client.get(manage_users_url)
-        self.assertEqual(response.status_code, 200)  # noqa: PT009
-        # extra_user has not been assigned to the library so should not show up in the list:
-        self.assertNotContains(response, extra_user.username)
-
-        # Now add extra_user to the library:
-        user_details_url = reverse_course_url(
-            'course_team_handler',
-            library.location.library_key, kwargs={'email': extra_user.email}
-        )
-        edit_response = self.client.ajax_post(user_details_url, {"role": LibraryUserRole.ROLE})
-        self.assertIn(edit_response.status_code, (200, 204))  # noqa: PT009
-
-        # Now extra_user should apear in the list:
-        response = self.client.get(manage_users_url)
-        self.assertEqual(response.status_code, 200)  # noqa: PT009
-        self.assertContains(response, extra_user.username)
-
     def test_component_limits(self):
         """
         Test that component limits in libraries are respected.
@@ -492,14 +461,11 @@ class UnitTestLibraries(CourseTestCase):
                         'django.conf.settings.FEATURES',
                         {"ENABLE_ORGANIZATION_STAFF_ACCESS_FOR_CONTENT_LIBRARIES": False}
                     ):
-                        with mock.patch.dict(
-                            'django.conf.settings.FEATURES',
-                            {"ENABLE_CREATOR_GROUP": False}
-                        ):
+                        with override_settings(ENABLE_CREATOR_GROUP=False):
                             organizations = get_allowed_organizations_for_libraries(self.user)
                             # Assert that the method returned the expected value
                             self.assertEqual(organizations, [])  # noqa: PT009
-                        with mock.patch.dict('django.conf.settings.FEATURES', {"ENABLE_CREATOR_GROUP": True}):
+                        with override_settings(ENABLE_CREATOR_GROUP=True):
                             # Assert that correct org values are returned based on course creator state
                             for course_creator_state in CourseCreator.STATES:
                                 course_creator.state = course_creator_state

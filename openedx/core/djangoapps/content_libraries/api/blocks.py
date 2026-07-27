@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
-from django.core.validators import validate_unicode_slug
+from django.core.validators import RegexValidator
 from django.db import transaction
 from django.db.models import F, QuerySet
 from django.urls import reverse
@@ -99,6 +99,14 @@ __all__ = [
     "get_library_component_publish_history_entries",
     "get_library_component_creation_entry",
 ]
+
+
+validate_block_id = RegexValidator(
+    r"^[\w.-]+\Z",
+    _(
+        "Block ID slugs can only have letters, numbers, underscores, hyphens, and periods."
+    )
+)
 
 
 def get_library_components(
@@ -523,7 +531,8 @@ def validate_can_add_block_to_library(
         )
 
     # Make sure the proposed ID will be valid:
-    validate_unicode_slug(block_id)
+    validate_block_id(block_id)
+
     # Ensure the XBlock type is valid and installed:
     block_class = XBlock.load_class(block_type)  # Will raise an exception if invalid
     if block_class.has_children:
@@ -591,7 +600,7 @@ def _import_staged_block(
     olx_str: str,
     library_key: LibraryLocatorV2,
     source_context_key: LearningContextKey,
-    user,
+    user: UserType,
     staged_content_id: StagedContentID,
     staged_content_files: list[StagedContentFileData],
     now: datetime,
@@ -697,7 +706,7 @@ def _import_staged_block(
         # This will create the first component version and set the OLX/title
         # appropriately. It will not publish. Once we get the newly created
         # ComponentVersion back from this, we can attach all our files to it.
-        set_library_block_olx(usage_key, olx_str, paths_to_media)
+        set_library_block_olx(usage_key, olx_str, paths_to_media, created_by=user.id)
 
     # Now return the metadata about the new block
     return get_library_block(usage_key)
@@ -713,7 +722,7 @@ def _is_container(block_type: str) -> bool:
 def _import_staged_block_as_container(
     library_key: LibraryLocatorV2,
     source_context_key: LearningContextKey,
-    user,
+    user: UserType,
     staged_content_id: StagedContentID,
     staged_content_files: list[StagedContentFileData],
     now: datetime,
@@ -829,7 +838,7 @@ def _import_staged_block_as_container(
     return container
 
 
-def import_staged_content_from_user_clipboard(library_key: LibraryLocatorV2, user) -> PublishableItem:
+def import_staged_content_from_user_clipboard(library_key: LibraryLocatorV2, user: UserType) -> PublishableItem:
     """
     Create a new library item from the staged content from clipboard.
     Can create containers (e.g. units) or XBlocks.
@@ -837,8 +846,10 @@ def import_staged_content_from_user_clipboard(library_key: LibraryLocatorV2, use
     Returns the newly created item metadata
     """
     from openedx.core.djangoapps.content_staging import api as content_staging_api
+    if user is None or user.id is None:
+        raise RuntimeError("A user is required.")  # Shouldn't happen - mostly here for type checker
 
-    user_clipboard = content_staging_api.get_user_clipboard(user)
+    user_clipboard = content_staging_api.get_user_clipboard(user.id)
     if not user_clipboard:
         raise ValidationError("The user's clipboard is empty")
 
@@ -852,11 +863,11 @@ def import_staged_content_from_user_clipboard(library_key: LibraryLocatorV2, use
         raise RuntimeError("olx_str missing")  # Shouldn't happen - mostly here for type checker
 
     now = datetime.now(tz=timezone.utc)  # noqa: UP017
+    lp_id = ContentLibrary.objects.get_by_key(library_key).learning_package_id
 
-    if _is_container(user_clipboard.content.block_type):
-        # This is a container and we can import it as such.
-        # Start an atomic section so the whole paste succeeds or fails together:
-        with transaction.atomic():
+    # Start an atomic section so the whole paste succeeds or fails together and creates a single change log entry:
+    with transaction.atomic(), content_api.bulk_draft_changes_for(lp_id, changed_by=user.id, changed_at=now):
+        if _is_container(user_clipboard.content.block_type):
             return _import_staged_block_as_container(
                 library_key,
                 source_context_key,
@@ -866,17 +877,17 @@ def import_staged_content_from_user_clipboard(library_key: LibraryLocatorV2, use
                 now,
                 olx_str=olx_str,
             )
-    else:
-        return _import_staged_block(
-            user_clipboard.content.block_type,
-            olx_str,
-            library_key,
-            source_context_key,
-            user,
-            staged_content_id,
-            staged_content_files,
-            now,
-        )
+        else:
+            return _import_staged_block(
+                user_clipboard.content.block_type,
+                olx_str,
+                library_key,
+                source_context_key,
+                user,
+                staged_content_id,
+                staged_content_files,
+                now,
+            )
 
 def get_or_create_olx_media_type(block_type: str) -> MediaType:
     """

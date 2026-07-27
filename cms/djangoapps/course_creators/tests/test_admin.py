@@ -9,17 +9,14 @@ from django.contrib.admin.sites import AdminSite
 from django.core import mail
 from django.http import HttpRequest
 from django.test import TestCase
+from django.test.utils import override_settings
 
 from cms.djangoapps.course_creators.admin import CourseCreatorAdmin
 from cms.djangoapps.course_creators.models import CourseCreator
+from common.djangoapps.edxmako.shortcuts import render_to_string
 from common.djangoapps.student import auth
 from common.djangoapps.student.roles import CourseCreatorRole
 from common.djangoapps.student.tests.factories import UserFactory
-
-
-def mock_render_to_string(template_name, context):
-    """Return a string that encodes template_name and context"""
-    return str((template_name, context))
 
 
 class CourseCreatorAdminTest(TestCase):
@@ -51,15 +48,15 @@ class CourseCreatorAdminTest(TestCase):
         self.creator_admin = CourseCreatorAdmin(self.table_entry, AdminSite())
 
         self.studio_request_email = 'mark@marky.mark'
-        self.enable_creator_group_patch = {
-            "ENABLE_CREATOR_GROUP": True,
-            "STUDIO_REQUEST_EMAIL": self.studio_request_email
+        self.context = {
+            'studio_request_email': self.studio_request_email,
+            'is_secure': False,
+            'site': 'localhost:8001',
+            'user_name': 'test_user',
+            'user_email': 'test_user+courses@edx.org',
         }
 
-    @mock.patch(
-        'cms.djangoapps.course_creators.admin.render_to_string',
-        mock.Mock(side_effect=mock_render_to_string, autospec=True)
-    )
+    @override_settings(ENABLE_CREATOR_GROUP=True, STUDIO_REQUEST_EMAIL='mark@marky.mark')
     @mock.patch('django.contrib.auth.models.User.email_user')
     def test_change_status(self, email_user):
         """
@@ -71,7 +68,6 @@ class CourseCreatorAdminTest(TestCase):
             self._change_state(state)
             self.assertEqual(is_creator, auth.user_has_role(self.user, CourseCreatorRole()))  # noqa: PT009
 
-            context = {'studio_request_email': self.studio_request_email}
             if state == CourseCreator.GRANTED:
                 template = 'emails/course_creator_granted.txt'
             elif state == CourseCreator.DENIED:
@@ -79,34 +75,29 @@ class CourseCreatorAdminTest(TestCase):
             else:
                 template = 'emails/course_creator_revoked.txt'
             email_user.assert_called_with(
-                mock_render_to_string('emails/course_creator_subject.txt', context),
-                mock_render_to_string(template, context),
+                render_to_string('emails/course_creator_subject.txt', self.context).strip(),
+                render_to_string(template, self.context),
                 self.studio_request_email
             )
 
-        with mock.patch.dict('django.conf.settings.FEATURES', self.enable_creator_group_patch):
+        # User is initially unrequested.
+        self.assertFalse(auth.user_has_role(self.user, CourseCreatorRole()))  # noqa: PT009
 
-            # User is initially unrequested.
-            self.assertFalse(auth.user_has_role(self.user, CourseCreatorRole()))  # noqa: PT009
+        change_state_and_verify_email(CourseCreator.GRANTED, True)
 
-            change_state_and_verify_email(CourseCreator.GRANTED, True)
+        change_state_and_verify_email(CourseCreator.DENIED, False)
 
-            change_state_and_verify_email(CourseCreator.DENIED, False)
+        change_state_and_verify_email(CourseCreator.GRANTED, True)
 
-            change_state_and_verify_email(CourseCreator.GRANTED, True)
+        change_state_and_verify_email(CourseCreator.PENDING, False)
 
-            change_state_and_verify_email(CourseCreator.PENDING, False)
+        change_state_and_verify_email(CourseCreator.GRANTED, True)
 
-            change_state_and_verify_email(CourseCreator.GRANTED, True)
+        change_state_and_verify_email(CourseCreator.UNREQUESTED, False)
 
-            change_state_and_verify_email(CourseCreator.UNREQUESTED, False)
+        change_state_and_verify_email(CourseCreator.DENIED, False)
 
-            change_state_and_verify_email(CourseCreator.DENIED, False)
-
-    @mock.patch(
-        'cms.djangoapps.course_creators.admin.render_to_string',
-        mock.Mock(side_effect=mock_render_to_string, autospec=True)
-    )
+    @override_settings(ENABLE_CREATOR_GROUP=True, STUDIO_REQUEST_EMAIL='mark@marky.mark')
     def test_mail_admin_on_pending(self):
         """
         Tests that the admin account is notified when a user is in the 'pending' state.
@@ -121,16 +112,15 @@ class CourseCreatorAdminTest(TestCase):
             # message sent. Admin message will follow.
             base_num_emails = 1 if expect_sent_to_user else 0
             if expect_sent_to_admin:
-                context = {'user_name': 'test_user', 'user_email': 'test_user+courses@edx.org'}
 
                 self.assertEqual(base_num_emails + 1, len(mail.outbox), 'Expected admin message to be sent')  # noqa: PT009  # pylint: disable=line-too-long
                 sent_mail = mail.outbox[base_num_emails]
                 self.assertEqual(  # noqa: PT009
-                    mock_render_to_string('emails/course_creator_admin_subject.txt', context),
+                    render_to_string('emails/course_creator_admin_subject.txt', self.context).strip(),
                     sent_mail.subject
                 )
                 self.assertEqual(  # noqa: PT009
-                    mock_render_to_string('emails/course_creator_admin_user_pending.txt', context),
+                    render_to_string('emails/course_creator_admin_user_pending.txt', self.context),
                     sent_mail.body
                 )
                 self.assertEqual(self.studio_request_email, sent_mail.from_email)  # noqa: PT009
@@ -138,18 +128,17 @@ class CourseCreatorAdminTest(TestCase):
             else:
                 self.assertEqual(base_num_emails, len(mail.outbox))  # noqa: PT009
 
-        with mock.patch.dict('django.conf.settings.FEATURES', self.enable_creator_group_patch):
-            # E-mail message should be sent to admin only when new state is PENDING, regardless of what
-            # previous state was (unless previous state was already PENDING).
-            # E-mail message sent to user only on transition into and out of GRANTED state.
-            check_admin_message_state(CourseCreator.UNREQUESTED, expect_sent_to_admin=False, expect_sent_to_user=False)
-            check_admin_message_state(CourseCreator.PENDING, expect_sent_to_admin=True, expect_sent_to_user=False)
-            check_admin_message_state(CourseCreator.GRANTED, expect_sent_to_admin=False, expect_sent_to_user=True)
-            check_admin_message_state(CourseCreator.DENIED, expect_sent_to_admin=False, expect_sent_to_user=True)
-            check_admin_message_state(CourseCreator.GRANTED, expect_sent_to_admin=False, expect_sent_to_user=True)
-            check_admin_message_state(CourseCreator.PENDING, expect_sent_to_admin=True, expect_sent_to_user=True)
-            check_admin_message_state(CourseCreator.PENDING, expect_sent_to_admin=False, expect_sent_to_user=False)
-            check_admin_message_state(CourseCreator.DENIED, expect_sent_to_admin=False, expect_sent_to_user=True)
+        # E-mail message should be sent to admin only when new state is PENDING, regardless of what
+        # previous state was (unless previous state was already PENDING).
+        # E-mail message sent to user only on transition into and out of GRANTED state.
+        check_admin_message_state(CourseCreator.UNREQUESTED, expect_sent_to_admin=False, expect_sent_to_user=False)
+        check_admin_message_state(CourseCreator.PENDING, expect_sent_to_admin=True, expect_sent_to_user=False)
+        check_admin_message_state(CourseCreator.GRANTED, expect_sent_to_admin=False, expect_sent_to_user=True)
+        check_admin_message_state(CourseCreator.DENIED, expect_sent_to_admin=False, expect_sent_to_user=True)
+        check_admin_message_state(CourseCreator.GRANTED, expect_sent_to_admin=False, expect_sent_to_user=True)
+        check_admin_message_state(CourseCreator.PENDING, expect_sent_to_admin=True, expect_sent_to_user=True)
+        check_admin_message_state(CourseCreator.PENDING, expect_sent_to_admin=False, expect_sent_to_user=False)
+        check_admin_message_state(CourseCreator.DENIED, expect_sent_to_admin=False, expect_sent_to_user=True)
 
     def _change_state(self, state):
         """ Helper method for changing state """
