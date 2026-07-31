@@ -1052,9 +1052,9 @@ class AccountRetirementStatusView(ViewSet):
             retirement_ids = list(retirements.values_list('id', flat=True))
             # Update by IDs
             UserRetirementStatus.objects.filter(id__in=retirement_ids).update(
-                original_username="redacted",
-                original_email="redacted",
-                original_name="redacted"
+                original_username="redacted-before-delete",
+                original_email="redacted-before-delete@safe.com",
+                original_name="redacted-before-delete"
             )
             # Delete by IDs
             UserRetirementStatus.objects.filter(id__in=retirement_ids, current_state=complete_state).delete()

@@ -1087,15 +1087,9 @@ class TestAccountRetirementCleanup(RetirementTestCase):
         update_query = update_queries[0]
         sql_lower = update_query['sql']
         # Ensure original_username, original_email, and original_name are set to redacted values
-        assert '"original_username" = \'redacted\'' in sql_lower, (
-            f"UPDATE query missing '\"original_username\" = redacted': {sql_lower}"
-        )
-        assert '"original_email" = \'redacted\'' in sql_lower, (
-            f"UPDATE query missing '\"original_email\" = redacted': {sql_lower}"
-        )
-        assert '"original_name" = \'redacted\'' in sql_lower, (
-            f"UPDATE query missing '\"original_name\" = redacted': {sql_lower}"
-        )
+        assert '"original_username" = \'redacted-before-delete\'' in sql_lower
+        assert '"original_email" = \'redacted-before-delete@safe.com\'' in sql_lower
+        assert '"original_name" = \'redacted-before-delete\'' in sql_lower
         # Ensure UPDATE uses ID-based filtering
         assert '"id" IN' in sql_lower or 'WHERE "id"' in sql_lower, (
             f"UPDATE query should use ID filtering to prevent over-update, but got: {sql_lower}"
@@ -1135,9 +1129,9 @@ class TestAccountRetirementCleanup(RetirementTestCase):
         # Create an unrelated record that already has redacted field values
         other_user = UserFactory()
         other_retirement = create_retirement_status(other_user, state=self.complete_state)
-        other_retirement.original_username = 'redacted'
-        other_retirement.original_email = 'redacted'
-        other_retirement.original_name = 'redacted'
+        other_retirement.original_username = 'redacted-before-delete'
+        other_retirement.original_email = 'redacted-before-delete@safe.com'
+        other_retirement.original_name = 'redacted-before-delete'
         other_retirement.save()
         other_id = other_retirement.id
         # Clean up only self.usernames records
