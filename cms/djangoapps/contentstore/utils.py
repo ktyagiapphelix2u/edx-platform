@@ -1386,11 +1386,7 @@ def get_course_settings(request, course_key, course_block):
         'ENABLE_PUBLISHER',
         settings.FEATURES.get('ENABLE_PUBLISHER', False)
     )
-    marketing_enabled = configuration_helpers.get_value_for_org(
-        course_block.location.org,
-        'ENABLE_MKTG_SITE',
-        settings.FEATURES.get('ENABLE_MKTG_SITE', False)
-    )
+    marketing_enabled = True
     enable_extended_course_details = configuration_helpers.get_value_for_org(
         course_block.location.org,
         'ENABLE_EXTENDED_COURSE_DETAILS',
@@ -1630,7 +1626,7 @@ def get_course_context(request):
         }
 
     courses_iter, in_process_course_actions = get_courses_accessible_to_user(request)
-    split_archived = settings.FEATURES.get('ENABLE_SEPARATE_ARCHIVED_COURSES', False)
+    split_archived = settings.ENABLE_SEPARATE_ARCHIVED_COURSES
     active_courses, archived_courses = _process_courses_list(courses_iter, in_process_course_actions, split_archived)
     in_process_course_actions = [format_in_process_course_view(uca) for uca in in_process_course_actions]
     return active_courses, archived_courses, in_process_course_actions
@@ -1863,7 +1859,7 @@ def _get_course_index_context(request, course_key, course_block):
 
     lms_link = get_lms_link_for_item(course_block.location)
     reindex_link = None
-    if settings.FEATURES.get('ENABLE_COURSEWARE_INDEX', False):
+    if settings.ENABLE_COURSEWARE_INDEX:
         if GlobalStaff().has_user(request.user):
             reindex_link = f"/course/{str(course_key)}/search_reindex"
     sections = course_block.get_children()

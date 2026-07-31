@@ -483,7 +483,7 @@ edx-drf-extensions==10.6.0
     #   enterprise-integrated-channels
     #   openedx-authz
     #   openedx-core
-edx-enterprise==8.7.0
+edx-enterprise==8.7.2
     # via
     #   -c requirements/constraints.txt
     #   -r requirements/edx/kernel.in
@@ -580,7 +580,7 @@ enmerkar==0.7.1
     # via enmerkar-underscore
 enmerkar-underscore==2.4.0
     # via -r requirements/edx/kernel.in
-enterprise-integrated-channels==0.1.62
+enterprise-integrated-channels==0.1.65
     # via -r requirements/edx/bundled.in
 event-tracking==4.0.2
     # via
