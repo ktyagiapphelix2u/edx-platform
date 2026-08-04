@@ -6,6 +6,7 @@ import logging
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
+from django.db import transaction
 
 from lms.djangoapps.verify_student.models import ManualVerification
 
@@ -35,9 +36,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         if not getattr(settings, 'REDACT_MANUAL_VERIFICATION_HISTORICAL_PII', False):
-            self.stdout.write(
-                'REDACT_MANUAL_VERIFICATION_HISTORICAL_PII is not enabled. Skipping.'
-            )
+            log.info('REDACT_MANUAL_VERIFICATION_HISTORICAL_PII is not enabled. Skipping.')
             return
 
         dry_run = options['dry_run']
@@ -57,7 +56,9 @@ class Command(BaseCommand):
             self.stdout.write(f'[dry-run] Would clear PII and delete {count} record(s). No changes made.')
             return
 
-        retired_records.update(name='')
-        deleted_count, _ = retired_records.delete()
-        log.info('Deleted %d ManualVerification record(s) for retired users.', deleted_count)
-        self.stdout.write(self.style.SUCCESS(f'Successfully deleted {deleted_count} record(s).'))
+        with transaction.atomic():
+            retired_records.update(name='')
+            retired_records.delete()
+
+        log.info('Deleted %d ManualVerification record(s) for retired users.', count)
+        self.stdout.write(self.style.SUCCESS(f'Successfully deleted {count} record(s).'))
