@@ -35,7 +35,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         if not getattr(settings, 'REDACT_MANUAL_VERIFICATION_HISTORICAL_PII', False):
-            log.info('Skipping: REDACT_MANUAL_VERIFICATION_HISTORICAL_PII is not enabled.')
+            log.warning('Skipping. REDACT_MANUAL_VERIFICATION_HISTORICAL_PII must first be enabled.')
             return
 
         dry_run = options['dry_run']
