@@ -1004,7 +1004,7 @@ class LoginFailures(models.Model):
         """
         Returns whether the feature flag around this functionality has been set
         """
-        return settings.FEATURES['ENABLE_MAX_FAILED_LOGIN_ATTEMPTS']
+        return settings.ENABLE_MAX_FAILED_LOGIN_ATTEMPTS
 
     @classmethod
     def is_user_locked_out(cls, user):
@@ -1313,7 +1313,7 @@ def log_successful_login(sender, request, user, **kwargs):  # pylint: disable=un
             'event_type': "login",
         }
     )
-    if settings.FEATURES['SQUELCH_PII_IN_LOGS']:
+    if settings.SQUELCH_PII_IN_LOGS:
         AUDIT_LOG.info(f"Login success - user.id: {user.id}")
     else:
         AUDIT_LOG.info(f"Login success - {user.username} ({user.email})")
@@ -1330,7 +1330,7 @@ def log_successful_logout(sender, request, user, **kwargs):  # pylint: disable=u
                 'event_type': "logout",
             }
         )
-        if settings.FEATURES['SQUELCH_PII_IN_LOGS']:
+        if settings.SQUELCH_PII_IN_LOGS:
             AUDIT_LOG.info(f'Logout - user.id: {request.user.id}')  # pylint: disable=logging-format-interpolation
         else:
             AUDIT_LOG.info(f'Logout - {request.user}')  # pylint: disable=logging-format-interpolation
@@ -1370,7 +1370,7 @@ def enforce_single_login(sender, request, user, signal, **kwargs):  # pylint: di
     Sets the current session id in the user profile,
     to prevent concurrent logins.
     """
-    if settings.FEATURES.get('PREVENT_CONCURRENT_LOGINS', False):
+    if settings.PREVENT_CONCURRENT_LOGINS:
         if signal == user_logged_in:
             key = request.session.session_key
         else:

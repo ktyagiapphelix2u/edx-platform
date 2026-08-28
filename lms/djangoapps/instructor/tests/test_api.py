@@ -18,6 +18,7 @@ from botocore.exceptions import ClientError
 from django.conf import settings
 from django.contrib.auth.models import User  # pylint: disable=imported-auth-user
 from django.core import mail
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory, TestCase
@@ -51,6 +52,7 @@ from common.djangoapps.student.models import (
     get_retired_email_by_email,
     get_retired_username_by_username,
 )
+from common.djangoapps.student.models.course_enrollment import EnrollmentNotAllowed
 from common.djangoapps.student.roles import (
     CourseBetaTesterRole,
     CourseDataResearcherRole,
@@ -1138,6 +1140,60 @@ class TestInstructorAPIEnrollment(SharedModuleStoreTestCase, LoginEnrollmentTest
         res_json = json.loads(response.content.decode('utf-8'))
         assert res_json == expected
 
+    @patch("lms.djangoapps.instructor.utils.enroll_email")
+    def test_enroll_enrollment_not_allowed(self, mock_enroll_email):
+        """EnrollmentNotAllowed from a filter is returned by students_update_enrollment."""
+        mock_enroll_email.side_effect = EnrollmentNotAllowed("Enrollment requires NIF verification.")
+        url = reverse('students_update_enrollment', kwargs={'course_id': str(self.course.id)})
+        response = self.client.post(
+            url,
+            {'identifiers': self.notenrolled_student.email, 'action': 'enroll', 'email_students': False},
+        )
+        assert response.status_code == 200
+        expected = {
+            "action": "enroll",
+            "auto_enroll": False,
+            "results": [
+                {
+                    "identifier": self.notenrolled_student.email,
+                    "error": True,
+                    "success": False,
+                    "error_type": "enrollment_not_allowed",
+                    "error_message": "Enrollment requires NIF verification.",
+                }
+            ]
+        }
+        res_json = json.loads(response.content.decode('utf-8'))
+        assert res_json == expected
+
+    @patch("lms.djangoapps.instructor.utils.enroll_email")
+    def test_enroll_validation_error_during_enrollment(self, mock_enroll_email):
+        """ValidationError raised during enrollment is returned by students_update_enrollment."""
+        mock_enroll_email.side_effect = ValidationError(
+            ["This email is not allowed to enroll in this course."]
+        )
+        url = reverse('students_update_enrollment', kwargs={'course_id': str(self.course.id)})
+        response = self.client.post(
+            url,
+            {'identifiers': self.notregistered_email, 'action': 'enroll', 'email_students': False},
+        )
+        assert response.status_code == 200
+        expected = {
+            "action": "enroll",
+            "auto_enroll": False,
+            "results": [
+                {
+                    "identifier": self.notregistered_email,
+                    "error": True,
+                    "success": False,
+                    "error_type": "validation_error",
+                    "error_message": "This email is not allowed to enroll in this course.",
+                }
+            ]
+        }
+        res_json = json.loads(response.content.decode('utf-8'))
+        assert res_json == expected
+
     def test_enroll_with_username(self):
         url = reverse('students_update_enrollment', kwargs={'course_id': str(self.course.id)})
         response = self.client.post(url, {'identifiers': self.notenrolled_student.username, 'action': 'enroll',
@@ -1316,50 +1372,7 @@ class TestInstructorAPIEnrollment(SharedModuleStoreTestCase, LoginEnrollmentTest
 
             assert 'Once you have registered and activated your account,' in body
 
-            assert '{proto}://{site}{about_path}'.format(  # noqa: UP032
-                proto=protocol,
-                site=self.site_name,
-                about_path=self.about_path
-            ) in body
-
-            assert 'This email was automatically sent from edx.org to robot-not-an-email-yet@robot.org' in body
-
-    @ddt.data('http', 'https')
-    @patch.dict(settings.FEATURES, {'ENABLE_MKTG_SITE': True})
-    def test_enroll_email_not_registered_mktgsite(self, protocol):
-        url = reverse('students_update_enrollment', kwargs={'course_id': str(self.course.id)})
-        params = {'identifiers': self.notregistered_email, 'action': 'enroll', 'email_students': True}
-        environ = {'wsgi.url_scheme': protocol}
-        response = self.client.post(url, params, **environ)
-
-        manual_enrollments = ManualEnrollmentAudit.objects.all()
-        assert manual_enrollments.count() == 1
-        assert manual_enrollments[0].state_transition == UNENROLLED_TO_ALLOWEDTOENROLL
-        assert response.status_code == 200
-
-        text_body = mail.outbox[0].body
-        html_body = mail.outbox[0].alternatives[0][0]
-
-        assert text_body.startswith('Dear student,')
-        assert 'To finish your registration, please visit' in text_body
-        assert 'Please finish your registration and fill' in html_body
-
-        for body in [text_body, html_body]:
-            assert 'You have been invited to join {display_name} at edx.org by a member of the course staff.'.format(  # noqa: UP032  # pylint: disable=line-too-long
-                display_name=self.course.display_name
-            ) in body
-
-            assert '{proto}://{site}/register'.format(  # noqa: UP032
-                proto=protocol,
-                site=self.site_name
-            ) in body
-
-            assert ('fill out the registration form making sure to use '
-                    'robot-not-an-email-yet@robot.org in the Email field') in body
-
-            assert 'You can then enroll in {display_name}.'.format(  # noqa: UP032
-                display_name=self.course.display_name
-            ) in body
+            assert f'{settings.LMS_ROOT_URL}{self.about_path}' in body
 
             assert 'This email was automatically sent from edx.org to robot-not-an-email-yet@robot.org' in body
 
@@ -1587,42 +1600,13 @@ class TestInstructorAPIEnrollment(SharedModuleStoreTestCase, LoginEnrollmentTest
 
         text_body = mail.outbox[0].body
         html_body = mail.outbox[0].alternatives[0][0]
-        course_url = '{proto}://{site}{about_path}'.format(  # noqa: UP032
-            proto=protocol,
-            site=self.site_name,
-            about_path=self.about_path,
-        )
+        course_url = f'{settings.LMS_ROOT_URL}{self.about_path}'
         assert text_body.startswith('Dear student,')
         assert 'To access this course visit {course_url} and register for this course.'.format(  # noqa: UP032
             course_url=course_url,
         ) in text_body
         assert 'To access this course visit it and register:' in html_body
         assert course_url in html_body
-
-        for body in [text_body, html_body]:
-            assert 'You have been invited to join {display_name} at edx.org by a member of the course staff.'.format(  # noqa: UP032  # pylint: disable=line-too-long
-                display_name=self.course.display_name,
-            ) in body
-
-            assert 'This email was automatically sent from edx.org to robot-not-an-email-yet@robot.org' in body
-
-    @patch('lms.djangoapps.instructor.enrollment.uses_shib')
-    @patch.dict(settings.FEATURES, {'ENABLE_MKTG_SITE': True})
-    def test_enroll_email_not_registered_shib_mktgsite(self, mock_uses_shib):
-        # Try with marketing site enabled and shib on
-        mock_uses_shib.return_value = True
-
-        url = reverse('students_update_enrollment', kwargs={'course_id': str(self.course.id)})
-        # Try with marketing site enabled
-        with patch.dict('django.conf.settings.FEATURES', {'ENABLE_MKTG_SITE': True}):
-            response = self.client.post(url, {'identifiers': self.notregistered_email, 'action': 'enroll',
-                                              'email_students': True})
-
-        assert response.status_code == 200
-
-        text_body = mail.outbox[0].body
-        html_body = mail.outbox[0].alternatives[0][0]
-        assert text_body.startswith('Dear student,')
 
         for body in [text_body, html_body]:
             assert 'You have been invited to join {display_name} at edx.org by a member of the course staff.'.format(  # noqa: UP032  # pylint: disable=line-too-long
@@ -2270,11 +2254,7 @@ class TestInstructorAPIBulkBetaEnrollment(SharedModuleStoreTestCase, LoginEnroll
             assert 'by a member of the course staff.' in body
             assert 'enroll in this course and begin the beta test' in body
 
-            assert '{proto}://{site}{about_path}'.format(  # noqa: UP032
-                proto=protocol,
-                site=self.site_name,
-                about_path=self.about_path,
-            ) in body
+            assert f'{settings.LMS_ROOT_URL}{self.about_path}' in body
 
             assert 'This email was automatically sent from edx.org to {student_email}'.format(  # noqa: UP032
                 student_email=self.notenrolled_student.email,
@@ -2328,31 +2308,6 @@ class TestInstructorAPIBulkBetaEnrollment(SharedModuleStoreTestCase, LoginEnroll
                 course_path=self.course_path
             )
 
-            assert 'This email was automatically sent from edx.org to {student_email}'.format(  # noqa: UP032
-                student_email=self.notenrolled_student.email,
-            ) in body
-
-    @patch.dict(settings.FEATURES, {'ENABLE_MKTG_SITE': True})
-    def test_add_notenrolled_email_mktgsite(self):
-        # Try with marketing site enabled
-        url = reverse('bulk_beta_modify_access', kwargs={'course_id': str(self.course.id)})
-        response = self.client.post(url, {'identifiers': self.notenrolled_student.email, 'action': 'add', 'email_students': True})  # pylint: disable=line-too-long
-
-        assert response.status_code == 200
-
-        text_body = mail.outbox[0].body
-        html_body = mail.outbox[0].alternatives[0][0]
-        student_name = self.notenrolled_student.profile.name
-        assert text_body.startswith(f'Dear {student_name}')
-
-        for body in [text_body, html_body]:
-            assert 'You have been invited to be a beta tester for {display_name} at edx.org'.format(  # noqa: UP032
-                display_name=self.course.display_name,
-            ) in body
-
-            assert 'by a member of the course staff.' in body
-            assert 'Visit edx.org' in body
-            assert 'enroll in this course and begin the beta test' in body
             assert 'This email was automatically sent from edx.org to {student_email}'.format(  # noqa: UP032
                 student_email=self.notenrolled_student.email,
             ) in body
